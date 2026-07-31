@@ -247,8 +247,15 @@ function renderDemo(file) {
     '<h1>' + esc(demo.title) + '</h1>' +
     '<p class="lead">' + esc(demo.hook || '') + '</p>' +
 
-    '<div class="panel">' +
-      '<h3>参数（改完直接重跑，不改任何代码）</h3>' +
+    '<div class="btnrow" style="margin:0 0 18px">' +
+      '<button class="ghost" id="btnJump">↓ 直接去跑（跳过讲解）</button></div>' +
+    '<div id="demodoc">' + (demo.doc ? '<p class="hint">正在加载讲解…</p>' : '') + '</div>' +
+
+    '<div class="panel" id="runpanel">' +
+      '<h3>动手：改参数 → 运行 → 看输出</h3>' +
+      '<p class="hint" style="margin-top:0">' +
+        '参数只作为环境变量传给子进程，不改任何一行代码；' +
+        '文末「动手」那一节列了每个参数值得验证什么。</p>' +
       '<div class="params">' + (demo.params || []).map(paramHTML).join('') + '</div>' +
       '<div class="btnrow">' +
         '<button id="btnRun">运行</button>' +
@@ -324,6 +331,21 @@ function renderDemo(file) {
       document.getElementById('out').textContent = SNAP.outputs[file];
       document.getElementById('checks').innerHTML = renderChecks(demo, RUNS[file]);
     }
+  }
+
+  document.getElementById('btnJump').onclick = function () {
+    document.getElementById('runpanel').scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // 讲解正文: 场景 / 流程 / 算法 / 对比 / 怎么读输出 / 改哪个参数验证什么
+  if (demo.doc) {
+    loadDoc(demo.doc).then(function (md) {
+      var box = document.getElementById('demodoc');
+      if (box) box.innerHTML = mdToHtml(md);
+    }).catch(function (e) {
+      var box = document.getElementById('demodoc');
+      if (box) box.innerHTML = '<p class="hint">讲解加载失败：' + esc(e.message) + '</p>';
+    });
   }
 
   loadSource(file).then(function (t) {

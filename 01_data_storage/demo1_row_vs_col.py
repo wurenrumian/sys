@@ -74,6 +74,65 @@ def compress_ratio(buf: bytes) -> float:
     return len(buf) / max(1, len(zlib.compress(buf, 6)))
 
 
+# ---------------------------------------------------------------- 逐列专用编码
+# 列存真正的杀手锏不是"通用压缩器压得更好", 而是**分列之后每列可以各自选最优编码**.
+# 行存做不到这一点 —— 一行里各字段类型是混的, 只能一视同仁地丢给 zlib.
+# 下面四种编码各有各的适用场景, 后面的表会把这个"各有所长"跑出来.
+
+def enc_raw(col):
+    """不编码, 直接存 int64. 作为基线."""
+    return col.nbytes
+
+
+def enc_zlib(col):
+    """通用压缩: 什么列都能用, 但对谁都不是最优."""
+    return len(zlib.compress(col.tobytes(), 6))
+
+
+def enc_delta_zlib(col):
+    """Delta 编码 + 通用压缩: 只存相邻差值.
+
+    对单调/近似单调的列(时间戳、自增 ID、有序主键)效果极好 ——
+    原值域可能是 1.7e9 量级, 差值却只有 0 或 1, 熵接近 0.
+    对无序列则毫无用处(差值反而比原值更随机).
+    """
+    d = np.diff(col, prepend=col[:1])
+    return len(zlib.compress(d.tobytes(), 6))
+
+
+def enc_dict_rle(col):
+    """字典编码 + 游程编码(RLE): 值 -> 小整数, 再把连续相同的值折叠成 (值, 次数).
+
+    对低基数枚举列(场景/设备/国家/性别)是量身定做的.
+    高基数列上会退化 —— 字典本身就和原数据一样大.
+    """
+    uniq, codes = np.unique(col, return_inverse=True)
+    if len(uniq) > 65535:                    # 基数太高, 字典编码不适用
+        return None
+    codes = codes.astype(np.uint16)
+    # RLE: 找出游程边界
+    change = np.flatnonzero(np.diff(codes)) + 1
+    runs = len(change) + 1
+    dict_bytes = uniq.nbytes                 # 字典本身也要存
+    rle_bytes = runs * (2 + 4)               # 每个游程: 2 字节码 + 4 字节长度
+    return dict_bytes + min(rle_bytes, codes.nbytes)   # RLE 划不来时就存原始码
+
+
+def enc_bitpack(col):
+    """Bit-packing: 值域已知且小时, 用 ceil(log2(值域)) 位而不是 64 位.
+
+    对低基数、值域紧凑的列有效; 对稀疏 ID 这类值域巨大的列毫无帮助.
+    """
+    span = int(col.max() - col.min()) + 1
+    bits = max(1, int(np.ceil(np.log2(span))))
+    return int(np.ceil(len(col) * bits / 8)) + 16      # +16: 存 min 和 bits 的元数据
+
+
+ENCODINGS = [("原始int64", enc_raw), ("zlib", enc_zlib),
+             ("delta+zlib", enc_delta_zlib), ("字典+RLE", enc_dict_rle),
+             ("bit-pack", enc_bitpack)]
+
+
 def main():
     banner(74)
     print("=" * 74)
@@ -110,6 +169,47 @@ def main():
     for c in range(min(4, N_COLS)):
         print(f"    col{c:<3}{kind[c]:<16}{col_crs[c]:>6.2f}x")
     print("  -> 列存把同质数据放一起, 熵更低; 低基数枚举列还能进一步用字典/RLE 编码")
+
+    # ---------- 2b. 逐列专用编码对比 ----------
+    print("\n[2b] 分列之后, 每列可以各自选最优编码 (压缩比, 越大越好)")
+    print("     行存做不到这件事 —— 一行里各字段类型是混的, 只能一视同仁丢给 zlib.")
+    print(f"\n  {'列类型':<16}" + "".join(f"{n:>13}" for n, _ in ENCODINGS) + f"{'最优编码':>14}")
+    print("  " + "-" * (16 + 13 * len(ENCODINGS) + 14))
+    kind_names = ["时间戳(单调)", "稀疏ID(长尾)", "低基数枚举", "稠密浮点"]
+    best_of = {}
+    for c in range(min(4, N_COLS)):
+        col = col_tbl[c]
+        row = f"  {kind_names[c]:<14}"
+        best, best_name = 1.0, "-"
+        for name, fn in ENCODINGS:
+            nb = fn(col)
+            if nb is None:
+                row += f"{'不适用':>13}"
+                continue
+            r = col.nbytes / max(1, nb)
+            row += f"{r:>11.1f}x"
+            if name != "原始int64" and r > best:
+                best, best_name = r, name
+        best_of[kind_names[c]] = (best_name, best)
+        row += f"{best_name:>14}"
+        print(row)
+
+    print("\n  -> 四种列类型的最优编码**各不相同**:")
+    for k, (name, r) in best_of.items():
+        print(f"     {k:<14} -> {name:<12} ({r:.1f}x)")
+    print("     这就是列存第二个、也是更值钱的收益: **编码可以按列裁剪**.")
+    print("     通用 zlib 是所有列的'及格线', 而专用编码在对的列上能再翻几倍到几十倍.")
+    print("     Parquet/ORC 的编码选择器做的就是这件事: 扫一遍列的统计信息")
+    print("     (是否有序、基数多少、值域多大), 自动挑一种编码.")
+    print("\n     两个跑出来才知道的细节:")
+    print("     1. **字典+RLE 在低基数枚举列上输给了 bit-pack**. 因为这里的枚举值是随机排列的,")
+    print("        游程长度平均只有 1, RLE 完全没东西可折叠. RLE 的前提是**有序**.")
+    print("        这解释了一件真实的工程实践: 数仓会按低基数列做排序/聚簇(sort key、")
+    print("        clustering、Z-order) —— 排序本身不改变数据, 却能让 RLE 从失效变成暴击.")
+    print("        也就是说, **编码的效果取决于数据的物理顺序**, 而顺序也是可以设计的.")
+    print("     2. **稠密浮点对谁都不敏感** —— 近似随机的数据压不动.")
+    print("        这也是为什么 embedding 这类稠密向量的存储成本只能靠量化(fp16/int8)去降,")
+    print("        而不是靠压缩. 压缩解决不了'信息量本来就大'的问题.")
 
     # ---------- 3. 存储成本外推 ----------
     print("\n[3] 外推到千亿级/日 (假设单样本 1KB, 1000 亿条/日 = 100 PB/日 原始)")

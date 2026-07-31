@@ -54,12 +54,14 @@ def catalog_index(cat):
 
 
 def doc_whitelist(cat):
+    """允许读取的 markdown 白名单: 模块讲解 + 每个 demo 自己的详细文档。"""
     docs = set()
     for m in cat["modules"]:
         if m.get("doc"):
             docs.add(m["doc"])
-        for extra in m.get("extra_docs", []):
-            docs.add(extra["path"])
+        for d in m.get("demos", []):
+            if d.get("doc"):
+                docs.add(d["doc"])
     return docs
 
 

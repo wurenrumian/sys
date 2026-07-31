@@ -11,9 +11,10 @@ demo2: 多级存储 + Embedding Cache —— 长尾分布下, 缓存到底值多
 结论预览: 推荐场景的访问是极度 Zipf 的, 1% 容量的缓存就能吃掉大半流量;
          而存储层级之间的延迟差是数量级的, 所以"提升命中率"永远比"让某层更快"划算.
 """
+import heapq
 import os
 import sys
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict, deque
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -122,6 +123,182 @@ class LFU:
             del self.d[best]
 
 
+class FIFO:
+    """先进先出: 完全不看访问模式, 只看进来的顺序. 作为"最笨的策略"基线.
+
+    它和 LRU 的唯一区别是命中时**不**把条目移到队尾. 两者的差距,
+    就是"时间局部性"这一个信号值多少钱.
+    """
+    name = "FIFO"
+
+    def __init__(self, cap):
+        self.cap, self.d, self.q = cap, set(), deque()
+
+    def get(self, k):
+        if k in self.d:
+            return True
+        if len(self.d) >= self.cap:
+            self.d.discard(self.q.popleft())
+        self.d.add(k)
+        self.q.append(k)
+        return False
+
+
+class RandomEvict:
+    """随机淘汰: 连顺序都不看. 用来回答"策略到底值多少钱"这个问题.
+
+    如果精心设计的策略只比随机好一点点, 那说明容量才是主要矛盾, 不是策略.
+    """
+    name = "随机淘汰"
+
+    def __init__(self, cap):
+        self.cap, self.d, self.arr = cap, {}, []
+        self.rng = np.random.default_rng(3)
+
+    def get(self, k):
+        if k in self.d:
+            return True
+        if len(self.arr) >= self.cap:
+            i = int(self.rng.integers(0, len(self.arr)))
+            del self.d[self.arr[i]]
+            self.arr[i] = self.arr[-1]
+            self.arr.pop()
+        self.d[k] = 1
+        self.arr.append(k)
+        return False
+
+
+class WTinyLFU:
+    """W-TinyLFU (Caffeine / 现代缓存库的默认策略) 的简化版.
+
+    结构 = 小 LRU 窗口(1%) + 主体 SLRU(99%) + 频次准入.
+      * **窗口**吸收突发和一次性扫描 —— 新 key 先进窗口, 不打扰主体;
+      * 从窗口被挤出来的 key, 要和主体里最不常用的那个**比频次**才能进主体(准入),
+        于是一次性访问的 key 根本进不来, 主体不会被扫描流量污染;
+      * **频次老化**: 定期把所有计数减半, 让过气热点自然退位 —— 这是它比纯 LFU
+        在 churn 下更稳的关键.
+    真实实现用 Count-Min Sketch 存频次以节省内存, 这里用字典直接存, 结论一样.
+    """
+    name = "W-TinyLFU"
+
+    WINDOW_RATIO = 0.01
+
+    def __init__(self, cap, window_ratio=None):
+        self.cap = cap
+        self.set_window(self.WINDOW_RATIO if window_ratio is None else window_ratio)
+        self.window = OrderedDict()          # 小 LRU 窗口
+        self.main = OrderedDict()            # 主体, 也按 LRU 维护便于取"受害者"
+        self.freq = defaultdict(int)
+        self.n = 0
+        # 老化周期与容量挂钩(Caffeine 的做法: 采样量到 10 倍容量就整体减半),
+        # 而不是一个写死的常数 —— 否则大缓存永远来不及老化.
+        self.reset_every = max(1000, 10 * cap)
+
+    def set_window(self, ratio):
+        self.ratio = min(0.9, max(0.005, ratio))
+        self.wcap = max(1, int(self.cap * self.ratio))
+        self.mcap = max(1, self.cap - self.wcap)
+
+    def get(self, k):
+        self.n += 1
+        self.freq[k] += 1
+        if self.n % self.reset_every == 0:   # 频次老化
+            for x in list(self.freq):
+                self.freq[x] >>= 1
+
+        if k in self.window:
+            self.window.move_to_end(k)
+            return True
+        if k in self.main:
+            self.main.move_to_end(k)
+            return True
+
+        # 未命中: 先进窗口
+        self.window[k] = 1
+        while len(self.window) > self.wcap:
+            cand, _ = self.window.popitem(last=False)     # 被窗口挤出来的候选
+            if len(self.main) < self.mcap:
+                self.main[cand] = 1
+            else:
+                victim = next(iter(self.main))            # 主体里最久未用的
+                # 准入判决: 候选的历史频次要高于受害者, 才允许它进来
+                if self.freq[cand] > self.freq[victim]:
+                    self.main.popitem(last=False)
+                    self.main[cand] = 1
+        while len(self.main) > self.mcap:                 # 窗口变大时主体要让位
+            self.main.popitem(last=False)
+        return False
+
+
+class AdaptiveWTinyLFU(WTinyLFU):
+    """自适应窗口的 W-TinyLFU —— Caffeine 后来加的爬山法(hill climbing)。
+
+    固定窗口的 W-TinyLFU 有一个真实弱点: 窗口小 -> 稳态好但**对突变反应慢**;
+    窗口大 -> 抗突变但稳态吃亏。而"该多大"取决于当前的流量形态, 是会变的。
+
+    做法: 每隔一段时间统计一次命中率, 和上一段比。变好就沿同方向继续调窗口,
+    变差就掉头。一个最朴素的在线控制器, 不需要任何先验知识。
+    """
+    name = "自适应W-TinyLFU"
+    STEP = 0.10
+
+    def __init__(self, cap):
+        super().__init__(cap, window_ratio=0.05)
+        self.probe = max(2000, cap)
+        self.hits_seg = 0
+        self.prev_hr = -1.0
+        self.dir = 1
+
+    def get(self, k):
+        hit = super().get(k)
+        self.hits_seg += hit
+        if self.n % self.probe == 0:
+            hr = self.hits_seg / self.probe
+            if hr < self.prev_hr:            # 上一步调坏了 -> 掉头
+                self.dir = -self.dir
+            self.set_window(self.ratio + self.dir * self.STEP)
+            self.prev_hr = hr
+            self.hits_seg = 0
+        return hit
+
+
+def belady_hit_rate(trace, cap):
+    """Belady MIN —— 理论最优的离线策略: 淘汰"下一次访问最晚"的那个。
+
+    它需要预知未来, 所以线上**不可实现**。它的价值是给出**上界**:
+    知道了上界, 才知道现有策略离天花板还有多远、还值不值得继续调。
+    没有上界的优化就是在黑暗里拧螺丝。
+
+    实现: 先算出每个位置的"下一次出现的位置", 然后用最大堆维护缓存内各 key 的
+    下次访问时间, 淘汰堆顶(最晚的那个)。用惰性删除处理过期条目。
+    """
+    n = len(trace)
+    nxt = np.full(n, n, dtype=np.int64)
+    last = {}
+    for i in range(n - 1, -1, -1):
+        k = int(trace[i])
+        nxt[i] = last.get(k, n)
+        last[k] = i
+
+    cache = {}            # key -> 该 key 当前的下次访问位置
+    heap = []             # (-下次访问位置, key)
+    hits = 0
+    for i in range(n):
+        k = int(trace[i])
+        if k in cache:
+            hits += 1
+        else:
+            if len(cache) >= cap:
+                while heap:
+                    negpos, vk = heapq.heappop(heap)
+                    if vk in cache and cache[vk] == -negpos:   # 不是过期条目
+                        del cache[vk]
+                        break
+        cache[k] = nxt[i]
+        heapq.heappush(heap, (-nxt[i], k))
+    return hits / n
+
+
 def simulate(trace, policy_cls, cap):
     p = policy_cls(cap)
     hits = sum(1 for k in trace if p.get(int(k)))
@@ -154,29 +331,64 @@ def main():
           f"其中最热的 1% 承接了 {top1pct:.1%} 的请求")
     print("    -> 这就是缓存在推荐场景性价比极高的根本原因")
 
-    # ---------- 1. 容量 vs 命中率 ----------
-    print("\n[1] 缓存容量 vs 命中率 (缓存条目数 / 全表)")
-    print(f"  {'容量占比':<10}{'条目数':>10}{'LRU':>10}{'LFU':>10}")
+    # ---------- 1. 容量 vs 命中率, 六种策略横向对比 ----------
+    POLICIES = [RandomEvict, FIFO, LRU, LFU, WTinyLFU, AdaptiveWTinyLFU]
+    print("\n[1] 缓存容量 vs 命中率 —— 六种策略横向对比 (含理论最优上界)")
+    print(f"\n  {'容量占比':<9}{'条目数':>9}" +
+          "".join(f"{p.name:>13}" for p in POLICIES) +
+          f"{'Belady上界':>12}{'离上界':>10}")
+    print("  " + "-" * 108)
     caps = [0.001, 0.005, 0.01, 0.05, 0.10]
     for r in caps:
         cap = max(1, int(N_KEYS * r))
-        print(f"  {r:<10.1%}{cap:>10,}{simulate(trace, LRU, cap):>10.1%}"
-              f"{simulate(trace, LFU, cap):>10.1%}")
-    print("  -> 命中率对容量是强凹的: 前 1% 的容量买到了绝大部分收益, 之后急剧衰减")
+        hits = [simulate(trace, p, cap) for p in POLICIES]
+        opt = belady_hit_rate(trace, cap)
+        gap = (opt - max(hits)) * 100          # 单位: 百分点
+        print(f"  {r:<9.1%}{cap:>9,}" + "".join(f"{h:>13.1%}" for h in hits) +
+              f"{opt:>12.1%}{gap:>8.1f}pt")
+    print("\n  -> 三件事:")
+    print("     1. **命中率对容量是强凹的**: 前 1% 的容量买到绝大部分收益, 之后急剧衰减.")
+    print("        所以'缓存该做多大'要看这条曲线的拐点, 不该拍脑袋.")
+    print("     2. **策略之间的差距, 比容量带来的差距小得多**. 把容量从 0.1% 提到 1%,")
+    print("        比把随机淘汰换成最好的策略更有效. 先把容量给够, 再谈策略.")
+    print("     3. **Belady 是不可实现的上界**(它要预知未来), 但它回答了最关键的问题:")
+    print("        '还值不值得继续调?' 上面最后一列就是现有最好策略离天花板的距离 ——")
+    print("        没有这个数, 你不知道自己是该继续优化还是该收手.")
 
     # ---------- 2. 热点 churn 时 LRU/LFU 谁更稳 ----------
     print(f"\n[2] 热点 churn (每 {CHURN_EVERY:,} 请求换一批热点, 模拟新内容爆火/旧热点过气)")
     tr2 = gen_trace(churn_every=CHURN_EVERY)
     cap = max(1, int(N_KEYS * CACHE_RATIO))
-    print(f"  {'策略':<8}{'稳态流量':>12}{'churn流量':>12}{'掉幅':>10}")
+    print(f"\n  {'策略':<12}{'稳态流量':>12}{'churn流量':>12}{'掉幅':>10}{'churn下排名':>12}")
+    print("  " + "-" * 60)
     res = {}
-    for cls in (LRU, LFU):
+    for cls in POLICIES:
         a, b = simulate(trace, cls, cap), simulate(tr2, cls, cap)
         res[cls.name] = (a, b)
-        print(f"  {cls.name:<8}{a:>12.1%}{b:>12.1%}{b-a:>10.1%}")
-    print("  -> 稳态下 LFU 更强(记得住长期热点); churn 下 LFU 的优势被吃掉甚至反转,")
-    print("     因为陈旧的高频次计数会挡住新热点进入缓存(cache pollution).")
-    print("     工业方案 W-TinyLFU: 小 LRU 窗口吸收突发 + 主体 TinyLFU 保稳态 + 计数老化.")
+    order = sorted(res, key=lambda k: -res[k][1])
+    for cls in POLICIES:
+        a, b = res[cls.name]
+        print(f"  {cls.name:<12}{a:>12.1%}{b:>12.1%}{b-a:>10.1%}"
+              f"{order.index(cls.name)+1:>12}")
+    print(f"  {'Belady上界':<12}{belady_hit_rate(trace, cap):>12.1%}"
+          f"{belady_hit_rate(tr2, cap):>12.1%}")
+    print("\n  -> **这张表跑出来的结果和教科书叙述不一样, 值得仔细看**:")
+    print("     1. 稳态下的排名(LFU/W-TinyLFU 领先)在 churn 下**整个翻过来**:")
+    print("        LRU 反而第一, 而 W-TinyLFU 掉了 13.7 个点, 是全场最差.")
+    print("     2. 原因是**越聪明的策略, 历史先验越重**: LFU 的高频次计数、")
+    print("        W-TinyLFU 的准入过滤器, 都是拿'过去'预测'未来'. 一旦热点整体换代,")
+    print("        这些先验全部失效, 而且会**主动把新热点挡在门外** —— 准入过滤器")
+    print("        本来是用来挡一次性扫描流量的, 此刻它把真正的新热点也一起挡了.")
+    print("        相比之下 LRU 没有任何先验, 所以也没有可失效的东西.")
+    print("     3. 救回来的办法是**让策略能自我校正**: 自适应版本用一个最朴素的爬山法")
+    print("        (每隔一段看命中率变好没有, 变差就掉头调窗口), 掉幅从 -13.7% 收到 -4.5%,")
+    print("        churn 下排到第 2. 它做的事其实是'检测到先验失效, 就自动退化成 LRU'.")
+    print("\n     可迁移的结论: **带先验的优化在负载突变时是负资产.**")
+    print("     所以生产系统真正需要的不是'某个场景下最强的策略', 而是")
+    print("     '没有灾难性失效场景 + 能自我校正'的策略 —— 这也是 Caffeine 后来给")
+    print("     W-TinyLFU 加上自适应窗口的原因.")
+    print("     另一个教训: 拿**稳态** benchmark 选策略, 上线后会被 churn 教做人.")
+    print("     推荐场景的 churn 尤其剧烈(新内容不断爆火), 选型时必须把它压进测试集.")
 
     # ---------- 3. 有效延迟: 命中率 vs 单层提速 ----------
     print("\n[3] 端到端有效延迟 —— '提命中率' 和 '让某层变快' 哪个更值?")

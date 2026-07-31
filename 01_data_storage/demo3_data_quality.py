@@ -93,6 +93,80 @@ def null_rate(col, default=0.0):
     return float(np.mean(col == default))
 
 
+# ---------------------------------------------------------------- 更多监控指标
+# 上面只有 PSI 一个指标, 无法支撑"必须分层组合"这个结论 —— 那得把候选指标都摆出来,
+# 让它们在同一批事故上比一遍, 各自的盲区才会现形.
+
+def _hist(expect, actual, bins=None):
+    """公用的分桶: 边界一律取自**期望分布**并冻结, 否则漂移会被自适应分桶吃掉."""
+    bins = PSI_BINS if bins is None else bins
+    edges = np.quantile(expect, np.linspace(0, 1, bins + 1))
+    edges[0], edges[-1] = -np.inf, np.inf
+    e = np.histogram(expect, edges)[0] / len(expect)
+    a = np.histogram(actual, edges)[0] / len(actual)
+    eps = 1e-6
+    return np.clip(e, eps, None), np.clip(a, eps, None)
+
+
+def ks_stat(expect, actual):
+    """Kolmogorov-Smirnov: 两个经验 CDF 的最大垂直距离. 和 PSI 一样只看边缘分布,
+    但对**分布平移**更敏感, 且不依赖分桶."""
+    a = np.sort(actual)
+    e = np.sort(expect)
+    grid = np.concatenate([e, a])
+    cdf_e = np.searchsorted(e, grid, "right") / len(e)
+    cdf_a = np.searchsorted(a, grid, "right") / len(a)
+    return float(np.max(np.abs(cdf_e - cdf_a)))
+
+
+def js_div(expect, actual):
+    """Jensen-Shannon 散度: KL 的对称有界版本(0~ln2). 同样是边缘分布指标,
+    但比 PSI 数值稳定得多 —— PSI 在某个桶接近空时会爆炸."""
+    e, a = _hist(expect, actual)
+    m = (e + a) / 2
+    kl = lambda p, q: float((p * np.log(p / q)).sum())
+    return 0.5 * kl(e, m) + 0.5 * kl(a, m)
+
+
+def wasserstein1(expect, actual):
+    """1-Wasserstein(推土机距离): 把一个分布搬成另一个要移动多少"质量×距离".
+    它带**量纲**, 对分布平移线性敏感, 而 PSI/JS 对平移是饱和的."""
+    n = min(len(expect), len(actual), 20_000)
+    qs = np.linspace(0, 1, n)
+    return float(np.mean(np.abs(np.quantile(expect, qs) - np.quantile(actual, qs))))
+
+
+def single_feat_auc(x, y):
+    """单特征 AUC: 只用这一个特征去排序, 能排多准.
+
+    **这是唯一一个用到 label 的指标**, 也是唯一一个能看见"特征和 label 的关联"的指标.
+    代价: 需要等 label 回流(推荐场景里可能是几分钟到几天), 所以它是滞后信号.
+    """
+    return float(max(auc(y, x), auc(y, -x)))       # 取方向无关的判别力
+
+
+def mutual_info(x, y, bins=None):
+    """特征与 label 的互信息 I(X;Y). 和单特征 AUC 一样属于'关联类'指标,
+    但能抓到非单调的关联(单特征 AUC 只看单调排序能力)."""
+    bins = PSI_BINS if bins is None else bins
+    edges = np.quantile(x, np.linspace(0, 1, bins + 1))
+    edges[0], edges[-1] = -np.inf, np.inf
+    xb = np.clip(np.digitize(x, edges) - 1, 0, bins - 1)
+    mi = 0.0
+    n = len(x)
+    for b in range(bins):
+        m = xb == b
+        px = m.mean()
+        if px <= 0:
+            continue
+        for c in (0, 1):
+            pxy = float(np.mean(m & (y == c)))
+            py = float(np.mean(y == c))
+            if pxy > 0:
+                mi += pxy * np.log(pxy / (px * py))
+    return mi
+
+
 # ---------------------------------------------------------------- 事故注入
 def incident_none(X):
     return X.copy(), "无事故 (基线)"
@@ -179,6 +253,58 @@ def main():
     print(f"\n  对比事故1 (生产任务挂掉), 用最朴素的默认值率就能一眼抓到:")
     print(f"    feat_0 默认值率 = {null_rate(Xbad[:, 0]):.1%} (健康时 {null_rate(Xse[:, 0]):.1%})")
     print("  -> 越是'低级'的事故越好抓; 真正难的是语义级的不一致.")
+
+    # ------------------------------------------------------------ 指标横向对比
+    print("\n" + "=" * 80)
+    print("[指标横向对比] 六种监控指标 x 四种事故 —— 谁能抓到谁")
+    print("  对每种事故, 都在**真正被污染的那个特征**上算各项指标(不是取全特征最大值),")
+    print("  这样比的是指标本身的灵敏度, 而不是'碰巧哪个特征噪声大'.")
+
+    # (事故函数, 被污染的特征下标)
+    CASES = [(incident_missing, 0), (incident_shift, 1),
+             (incident_skew, 2), (incident_stale, 0)]
+    # (指标名, 函数(训练列, 线上列, 训练label, 线上label), 报警阈值, 是否需要 label)
+    METRICS = [
+        ("默认值率Δ", lambda a, b, ya, yb: abs(null_rate(b) - null_rate(a)), 0.05, False),
+        ("PSI",       lambda a, b, ya, yb: psi(a, b),                        0.25, False),
+        ("KS",        lambda a, b, ya, yb: ks_stat(a, b),                    0.10, False),
+        ("JS散度",     lambda a, b, ya, yb: js_div(a, b),                     0.02, False),
+        ("Wasserstein", lambda a, b, ya, yb: wasserstein1(a, b),             0.10, False),
+        ("单特征AUCΔ", lambda a, b, ya, yb: abs(single_feat_auc(a, ya) -
+                                               single_feat_auc(b, yb)),      0.01, True),
+        ("互信息Δ",    lambda a, b, ya, yb: abs(mutual_info(a, ya) -
+                                              mutual_info(b, yb)),           0.005, True),
+    ]
+
+    print(f"\n  {'事故':<30}{'ΔAUC':>8}" + "".join(f"{m[0]:>13}" for m in METRICS))
+    print("  " + "-" * (38 + 13 * len(METRICS)))
+    caught = [0] * len(METRICS)
+    for fn, j in CASES:
+        Xbad, label = fn(Xse)
+        dauc = auc(yse, Xbad @ w + b) - base_auc
+        row = f"  {label[:28]:<30}{dauc:>+8.4f}"
+        for mi_, (name, f, thr, _need) in enumerate(METRICS):
+            v = f(Xtr[:, j], Xbad[:, j], ytr, yse)
+            fired = v > thr
+            caught[mi_] += fired
+            row += f"{(('*' if fired else ' ') + f'{v:.3f}'):>13}"
+        print(row)
+    print(f"\n  {'抓到几种事故 (共 4 种)':<38}" +
+          "".join(f"{str(c)+'/4':>13}" for c in caught))
+    print("  (带 * 的表示该指标越过了报警阈值; 阈值见代码里的 METRICS 表)")
+
+    print("\n  -> 这张表才是'必须分层组合'的证据:")
+    print("     * **没有任何一个指标能抓到全部四种事故**;")
+    print("     * 边缘分布类(PSI/KS/JS/Wasserstein)彼此高度相关 —— 它们同时抓到、")
+    print("       也同时漏掉同一批事故. 再加一个同类指标是**冗余**, 不是补强;")
+    print("     * 唯一能看见事故3(离在线不一致)的, 是用到 label 的**关联类**指标")
+    print("       (单特征 AUC / 互信息) —— 因为只有它们看的是'特征和 label 的关系',")
+    print("       而不是'特征自己长什么样';")
+    print("     * 而关联类指标的代价是**要等 label 回流**, 在推荐场景里可能滞后几分钟")
+    print("       到几天. 所以它救不了'立刻发现', 只能用于兜底和事后归因.")
+    print("\n     这就直接给出了监控体系该怎么搭: 先用便宜且实时的统计/分布类指标做全量,")
+    print("     再用昂贵且滞后的关联类指标做采样兜底, 中间必须补上**离在线逐样本对拍**")
+    print("     —— 因为对拍是唯一既能实时、又能抓到语义错位的手段.")
 
     # ------------------------------------------------------------ 敏感度曲线
     print("\n" + "-" * 80)

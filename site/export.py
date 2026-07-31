@@ -52,6 +52,9 @@ def main():
             docs[m["doc"]] = read(p) if os.path.isfile(p) else "（缺少这份文档）"
         for d in m.get("demos", []):
             sources[d["file"]] = read(os.path.join(ROOT, d["file"]))
+            if d.get("doc"):
+                dp = os.path.join(ROOT, d["doc"])
+                docs[d["doc"]] = read(dp) if os.path.isfile(dp) else "（缺少这份文档）"
             if a.skip_run:
                 continue
             print(f"运行 {d['file']} ...", end="", flush=True)

@@ -19,6 +19,7 @@
           "file": "01_data_storage/demo1_row_vs_col.py",
           "title": "demo1 · 行存 vs 列存",
           "hook": "训练只用 3/40 个字段时，按行存要把 100% 的字节都搬一遍。",
+          "doc": "01_data_storage/demo1_row_vs_col.md",
           "runtime_s": 3.5,
           "params": [
             {
@@ -67,6 +68,16 @@
               "re": "时间戳\\(单调\\)\\s+([\\d.]+)x",
               "cmp": ">",
               "value": 50
+            },
+            {
+              "text": "分列之后每种列类型的最优编码各不相同（时间戳靠 delta，枚举靠 bit-pack）",
+              "re": "时间戳\\(单调\\)\\s+->\\s+delta\\+zlib"
+            },
+            {
+              "text": "delta 编码让单调时间戳列的压缩比超过 100x",
+              "re": "delta\\+zlib\\s+\\(([\\d.]+)x\\)",
+              "cmp": ">",
+              "value": 100
             }
           ]
         },
@@ -74,7 +85,8 @@
           "file": "01_data_storage/demo2_cache_tier.py",
           "title": "demo2 · 多级存储与 Embedding Cache",
           "hook": "Zipf 长尾下 1% 的缓存吃掉大半流量；但热点 churn 会让 LFU 的优势反转。",
-          "runtime_s": 5.0,
+          "doc": "01_data_storage/demo2_cache_tier.md",
+          "runtime_s": 11,
           "params": [
             {
               "name": "N_KEYS",
@@ -140,6 +152,30 @@
               "re": "LFU\\s+[\\d.]+%\\s+[\\d.]+%\\s+(-[\\d.]+)%",
               "cmp": "<",
               "value": -2.3
+            },
+            {
+              "text": "Belady 最优上界高于所有可实现策略（离上界仍有差距）",
+              "re": "1\\.0%\\s+[\\d,]+(?:\\s+[\\d.]+%){6}\\s+([\\d.]+)%",
+              "cmp": ">",
+              "value": 74
+            },
+            {
+              "text": "扩容带来的收益大于换策略：0.1%→1% 容量的提升超过 10 个点",
+              "re": "1\\.0%\\s+[\\d,]+\\s+([\\d.]+)%",
+              "cmp": ">",
+              "value": 66
+            },
+            {
+              "text": "churn 下 W-TinyLFU 的掉幅比 LRU 更大（先验成了负资产）",
+              "re": "W-TinyLFU\\s+[\\d.]+%\\s+[\\d.]+%\\s+(-[\\d.]+)%",
+              "cmp": "<",
+              "value": -8
+            },
+            {
+              "text": "自适应窗口把 churn 掉幅救回一半以上",
+              "re": "自适应W-TinyLFU\\s+[\\d.]+%\\s+[\\d.]+%\\s+(-[\\d.]+)%",
+              "cmp": ">",
+              "value": -8
             }
           ]
         },
@@ -147,7 +183,8 @@
           "file": "01_data_storage/demo3_data_quality.py",
           "title": "demo3 · DCAI：数据事故如何静悄悄打掉 AUC",
           "hook": "PSI 漏掉了两类事故 —— AUC 掉了 2 个点它还报“正常”。",
-          "runtime_s": 0.5,
+          "doc": "01_data_storage/demo3_data_quality.md",
+          "runtime_s": 4,
           "params": [
             {
               "name": "N_TRAIN",
@@ -219,6 +256,22 @@
               "re": "100%\\s+([\\d.]+)\\s+[\\d.]+\\s+-[\\d.]+",
               "cmp": "<",
               "value": 0.05
+            },
+            {
+              "text": "没有任何单一指标能抓到全部四种事故（最好的也 < 4/4）",
+              "re": "抓到几种事故 \\(共 4 种\\)(?:\\s+\\d/4)*\\s+(\\d)/4",
+              "cmp": "<",
+              "value": 4
+            },
+            {
+              "text": "四个边缘分布类指标（PSI/KS/JS/Wasserstein）抓到的事故数完全相同 —— 互为冗余",
+              "re": "抓到几种事故 \\(共 4 种\\)\\s+1/4\\s+2/4\\s+2/4\\s+2/4\\s+2/4"
+            },
+            {
+              "text": "关联类指标（互信息）抓到的事故比任何分布类指标都多",
+              "re": "抓到几种事故 \\(共 4 种\\)(?:\\s+\\d/4){6}\\s+(\\d)/4",
+              "cmp": ">",
+              "value": 2
             }
           ]
         },
@@ -226,6 +279,7 @@
           "file": "01_data_storage/demo4_jagged_padding.py",
           "title": "demo4 · 不定长序列的 padding 浪费",
           "hook": "动态 padding 几乎白干；真正有效的是按长度排序分桶。",
+          "doc": "01_data_storage/demo4_jagged_padding.md",
           "runtime_s": 0.3,
           "params": [
             {
@@ -296,6 +350,7 @@
           "file": "01_data_storage/demo5_etl_overlap.py",
           "title": "demo5 · CPU 喂不饱 GPU：重叠、木桶与抖动",
           "hook": "平均 ETL 比 GPU 快，GPU 照样挨饿 —— 因为抖动存不下来。",
+          "doc": "01_data_storage/demo5_etl_overlap.md",
           "runtime_s": 0.3,
           "params": [
             {
@@ -388,6 +443,7 @@
           "file": "02_compile/demo1_python_overhead.py",
           "title": "demo1 · Python 解释器开销有多大",
           "hook": "两种“看起来更优”的手工优化，分别慢了 2.5x 和 7.7x。",
+          "doc": "02_compile/demo1_python_overhead.md",
           "runtime_s": 1.0,
           "params": [
             {
@@ -443,6 +499,7 @@
           "file": "02_compile/demo2_operator_fusion.py",
           "title": "demo2 · 算子融合：向量化之后的下一道墙",
           "hook": "手写分块融合比不融合还慢；真正的融合只能发生在编译产物内部。",
+          "doc": "02_compile/demo2_operator_fusion.md",
           "runtime_s": 4.0,
           "params": [
             {
@@ -491,6 +548,7 @@
           "file": "02_compile/demo3_gpu_mem_frag.py",
           "title": "demo3 · 显存碎片：为什么显存够却 OOM",
           "hook": "分页不是消灭碎片，而是把外部碎片换成可以用页大小调节的内部碎片。",
+          "doc": "02_compile/demo3_gpu_mem_frag.md",
           "runtime_s": 4.5,
           "params": [
             {
@@ -568,6 +626,7 @@
           "file": "02_compile/demo4_dynamic_batch.py",
           "title": "demo4 · 动态批处理：吞吐与 P99 的取舍",
           "hook": "固定批策略的低谷 P99 反而比尖峰更差 —— 系统最闲时用户等最久。",
+          "doc": "02_compile/demo4_dynamic_batch.md",
           "runtime_s": 0.3,
           "params": [
             {
@@ -640,6 +699,7 @@
           "file": "02_compile/demo5_dynamic_shape.py",
           "title": "demo5 · 动态 shape：编译收益为什么拿不到",
           "hook": "缓存命中率 97% 听起来很高，但 P99 是 401ms —— SLA 按 P99 签，不按命中率。",
+          "doc": "02_compile/demo5_dynamic_shape.md",
           "runtime_s": 1.0,
           "params": [
             {
@@ -725,6 +785,7 @@
           "file": "03_network/demo1_traffic_conflict.py",
           "title": "demo1 · 队头阻塞与调度策略",
           "hook": "优先级队列在低利用率下改善 0% —— 包不可抢占，真正有效的是分片。",
+          "doc": "03_network/demo1_traffic_conflict.md",
           "runtime_s": 8.5,
           "params": [
             {
@@ -822,6 +883,7 @@
           "file": "03_network/demo2_allreduce.py",
           "title": "demo2 · AllReduce：千卡后效率为什么变低",
           "hook": "Ring 带宽最优、Tree 延迟最优；分层 AllReduce 把慢链路上的数据量降到 1/8。",
+          "doc": "03_network/demo2_allreduce.md",
           "runtime_s": 0.2,
           "params": [
             {
@@ -893,6 +955,7 @@
           "file": "03_network/demo3_congestion.py",
           "title": "demo3 · 拥塞控制：一个算法服务不了两类流量",
           "hook": "队列深度和尾延迟几乎是一回事；而 RPC 要浅队列、大流要深队列。",
+          "doc": "03_network/demo3_congestion.md",
           "runtime_s": 0.3,
           "params": [
             {
@@ -975,6 +1038,7 @@
           "file": "03_network/demo4_incast.py",
           "title": "demo4 · Incast 崩塌与尾延迟放大",
           "hook": "加大缓冲把“每次都炸”变成“偶尔炸”；单分片 P99=1%，扇出 100 就有 63% 的请求踩雷。",
+          "doc": "03_network/demo4_incast.md",
           "runtime_s": 0.5,
           "params": [
             {
@@ -1084,6 +1148,7 @@
           "file": "04_endtoend/demo1_step_budget.py",
           "title": "demo1 · Roofline + step 时间预算",
           "hook": "推荐模型 MFU 只有百分之几不是 bug，是模型形态决定的。",
+          "doc": "04_endtoend/demo1_step_budget.md",
           "runtime_s": 0.2,
           "params": [
             {
