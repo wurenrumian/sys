@@ -11,12 +11,19 @@ demo2: 算子融合 —— 向量化之后的下一道墙是访存, 不是算力
      融合后 = 1 个 kernel, 数据只过一遍内存, 中间结果留在寄存器/cache 里.
      **算术量完全相同, 访存量差好几倍** —— 而这类算子是彻底 memory-bound 的.
 """
+import os
+import sys
 import time
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_bool, banner  # noqa: E402
+
 np.seterr(all="ignore")
 
-REPEAT = 5
+REPEAT = env_int("REPEAT", 5, "每种写法重复次数(取最小值)")
+N_MAIN = env_int("N_MAIN", 8_000_000, "块大小扫描与访存分析用的规模")
+USE_TORCH = env_bool("USE_TORCH", True, "是否尝试 torch.compile 自动融合(慢, 可关掉)")
 
 
 def bench(fn, *args, repeat=REPEAT):
@@ -88,6 +95,7 @@ def try_torch_compile(a, b, c, s):
 
 
 def main():
+    banner(80)
     print("=" * 80)
     print("算子融合演示:  d = relu(a*b + c) * s")
     print("=" * 80)
@@ -117,7 +125,7 @@ def main():
     print("     访存量明明少了一半, 为什么反而更慢? 下面这个扫描给出答案.")
 
     # ------------------------------------------------------------ 块大小扫描
-    N = 8_000_000
+    N = N_MAIN
     rng = np.random.default_rng(0)
     a = rng.random(N, dtype=np.float32) - 0.5
     b = rng.random(N, dtype=np.float32) - 0.5
@@ -168,6 +176,8 @@ def main():
     print("\n" + "-" * 80)
     print("[自动融合] 交给真正的编译器: torch.compile (TorchInductor)")
     try:
+        if not USE_TORCH:
+            raise ImportError("USE_TORCH=0, 主动跳过")
         eager_t, comp_t = try_torch_compile(a, b, c, 1.7)
         print(f"  torch eager    : {eager_t*1e3:>8.2f} ms  (逐算子, 和 numpy 未融合同理)")
         if comp_t:
@@ -186,8 +196,8 @@ def main():
                 print(f"     {r:.2f}x 略低于访存分析的 2x 上限, 差额来自 kernel 启动与线程同步开销.")
         else:
             print("  torch.compile 在本机不可用(CPU 后端需要 C++ 编译器), 跳过.")
-    except ImportError:
-        print("  未安装 torch, 跳过.")
+    except ImportError as e:
+        print(f"  跳过: {e}" if "USE_TORCH" in str(e) else "  未安装 torch, 跳过.")
 
     print("\n" + "-" * 80)
     print("[对推荐场景的特殊意义]")

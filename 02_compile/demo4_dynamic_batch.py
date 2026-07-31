@@ -9,13 +9,21 @@ demo4: 动态批处理 —— 吞吐与 P99 的取舍, 以及为什么必须"自
 批处理是提升 GPU 利用率的第一手段, 但**攒批要等, 等就是延迟**.
 本 demo 用离散事件模拟, 在"正弦波动 + 突发尖峰"的真实流量下对比三种策略.
 """
+import os
+import sys
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_float, banner  # noqa: E402
 
 np.seterr(all="ignore")
 
-SIM_MS = 60_000          # 模拟 60 秒
-BASE_QPS = 800           # 平均 QPS
-SPIKE_AT = (30_000, 34_000)   # 第 30~34 秒有一个 3 倍尖峰
+SIM_MS = env_int("SIM_MS", 60_000, "模拟时长(ms)")
+BASE_QPS = env_int("BASE_QPS", 800, "平均 QPS")
+SPIKE_X = env_float("SPIKE_X", 3.0, "尖峰倍数")
+GPU_FIXED_MS = env_float("GPU_FIXED_MS", 2.0, "单批的固定启动开销(ms)")
+GPU_PER_REQ_MS = env_float("GPU_PER_REQ_MS", 0.012, "每条请求的边际计算耗时(ms)")
+SPIKE_AT = (SIM_MS // 2, SIM_MS // 2 + SIM_MS // 15)   # 中段一个尖峰
 EPS = 1e-9                    # 浮点容差, 防止离散事件模拟里时间无法推进
 
 
@@ -26,7 +34,7 @@ def batch_time_ms(bs):
     真实 GPU kernel 的典型形态: 固定启动开销 + 随 batch 线性增长的计算.
     正是这个固定开销让"攒批"有意义 —— 批越大, 每条请求摊到的开销越小.
     """
-    return 2.0 + 0.012 * bs      # 2ms 固定 + 每条 12us
+    return GPU_FIXED_MS + GPU_PER_REQ_MS * bs
 
 
 def gen_arrivals(seed=0):
@@ -37,7 +45,7 @@ def gen_arrivals(seed=0):
     while t < SIM_MS:
         qps = BASE_QPS * (1 + 0.4 * np.sin(2 * np.pi * t / 20_000))
         if SPIKE_AT[0] <= t < SPIKE_AT[1]:
-            qps *= 3.0
+            qps *= SPIKE_X
         t += rng.exponential(1000.0 / qps)
         if t < SIM_MS:
             times.append(t)
@@ -132,12 +140,15 @@ def simulate(arrivals, policy, max_bs=256, fixed_bs=64, timeout_ms=5.0):
 
 
 def main():
+    banner(84)
     arrivals = gen_arrivals()
     print("=" * 84)
     print(f"动态批处理演示: {len(arrivals):,} 个请求 / {SIM_MS/1000:.0f} 秒, "
           f"均值 {BASE_QPS} QPS")
-    print(f"流量形态: 正弦波动(±40%) + 第 {SPIKE_AT[0]/1000:.0f}~{SPIKE_AT[1]/1000:.0f} 秒 3 倍尖峰")
-    print(f"GPU 成本模型: 单批耗时 = 2.0ms 固定开销 + 0.012ms x batch_size")
+    print(f"流量形态: 正弦波动(±40%) + 第 {SPIKE_AT[0]/1000:.0f}~{SPIKE_AT[1]/1000:.0f} 秒 "
+          f"{SPIKE_X:g} 倍尖峰")
+    print(f"GPU 成本模型: 单批耗时 = {GPU_FIXED_MS:g}ms 固定开销 + "
+          f"{GPU_PER_REQ_MS:g}ms x batch_size")
     print("=" * 84)
 
     configs = [

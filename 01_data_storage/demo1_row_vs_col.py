@@ -10,13 +10,21 @@ demo1: 行存 vs 列存 —— 训练样本只用一小部分字段时, I/O 量�
   2. 反序列化耗时
   3. 压缩比       (列存同质数据熵更低)
 """
+import os
+import sys
 import time
 import zlib
 import numpy as np
 
-N_ROWS = 200_000
-N_COLS = 40
-PROJECT = [3, 17, 29]  # 训练只需要这 3 个字段
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, banner  # noqa: E402
+
+N_ROWS = env_int("N_ROWS", 200_000, "样本行数")
+N_COLS = env_int("N_COLS", 40, "字段数(宽表有多宽)")
+N_PROJ = env_int("N_PROJ", 3, "训练实际用到几个字段(投影度)")
+
+# 投影哪几列: 用一个固定步长挑, 保证覆盖到不同类型的字段(时间戳/稀疏ID/枚举/浮点)
+PROJECT = sorted({(i * 7 + 3) % N_COLS for i in range(N_PROJ)})
 
 rng = np.random.default_rng(0)
 
@@ -67,6 +75,7 @@ def compress_ratio(buf: bytes) -> float:
 
 
 def main():
+    banner(74)
     print("=" * 74)
     print(f"样本: {N_ROWS:,} 行 x {N_COLS} 字段 (int64), 训练只投影字段 {PROJECT}")
     print("=" * 74)
@@ -80,7 +89,7 @@ def main():
     c_bytes, c_time, c_out = scan_col(col_tbl, PROJECT)
     assert np.array_equal(r_out, c_out), "两种布局必须算出同样的结果"
 
-    print("\n[1] 投影扫描 (读 3/40 个字段)")
+    print(f"\n[1] 投影扫描 (读 {len(PROJECT)}/{N_COLS} 个字段)")
     print(f"  {'':<10}{'扫描字节':>14}{'耗时(ms)':>12}")
     print(f"  {'行存':<10}{r_bytes/1e6:>12.1f}MB{r_time*1e3:>12.2f}")
     print(f"  {'列存':<10}{c_bytes/1e6:>12.1f}MB{c_time*1e3:>12.2f}")
@@ -98,7 +107,7 @@ def main():
     print(f"  列存整表          : {col_total_raw/col_total_zip:>6.2f}x")
     print("  列存分列看 (前 4 列, 展示不同字段类型的可压缩性差异):")
     kind = ["时间戳(单调)", "稀疏ID(长尾)", "低基数枚举", "稠密浮点"]
-    for c in range(4):
+    for c in range(min(4, N_COLS)):
         print(f"    col{c:<3}{kind[c]:<16}{col_crs[c]:>6.2f}x")
     print("  -> 列存把同质数据放一起, 熵更低; 低基数枚举列还能进一步用字典/RLE 编码")
 

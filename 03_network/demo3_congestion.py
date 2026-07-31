@@ -10,17 +10,23 @@ demo3: 拥塞控制 —— 为什么一个算法服务不了两类流量
          而队列深度 ≈ 排队延迟, 所以 (b) 就是尾延迟.
          填满队列才能确保链路不空闲 -> 两个目标天然冲突.
 """
+import os
+import sys
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_float, banner  # noqa: E402
 
 np.seterr(all="ignore")
 
 # ---------------------------------------------------------------- 链路参数
-LINK_PKT_PER_MS = 100.0     # 瓶颈链路: 每 ms 能发 100 个包
-RTT_MS = 1.0                # 基础往返延迟
-BDP = LINK_PKT_PER_MS * RTT_MS   # 带宽时延积 = 100 包(在途数据的理想量)
-QUEUE_CAP = 500             # 交换机队列容量(包), 超了就丢
-SIM_MS = 4000
-DCTCP_K = 20                # DCTCP 的 ECN 标记阈值(队列超过 K 就打标)
+LINK_PKT_PER_MS = env_float("LINK_PKT_PER_MS", 100.0, "瓶颈链路每 ms 能发多少包")
+RTT_MS = env_float("RTT_MS", 1.0, "基础往返延迟(ms)")
+BDP = LINK_PKT_PER_MS * RTT_MS   # 带宽时延积 = 在途数据的理想量
+QUEUE_CAP = env_int("QUEUE_CAP", 500, "交换机队列容量(包), 超了就丢")
+SIM_MS = env_int("SIM_MS", 4000, "模拟时长(ms)")
+DCTCP_K = env_int("DCTCP_K", 20, "DCTCP 的 ECN 标记阈值(包)")
+N_FLOWS = env_int("N_FLOWS", 4, "并发流数")
 
 
 class Reno:
@@ -93,12 +99,13 @@ class BBRLike:
         pass                        # BBR 不响应单个丢包/标记
 
 
-def simulate(cc_cls, n_flows=4, sim_ms=SIM_MS, k=DCTCP_K):
+def simulate(cc_cls, n_flows=None, sim_ms=SIM_MS, k=DCTCP_K):
     """极简的流体近似模拟: 按 ms 推进, 每个 ms 结算一次链路和队列.
 
     这不是包级仿真, 但足以复现拥塞控制的核心动力学:
     在途数据 > BDP 的部分会堆在队列里, 队列深度直接决定排队延迟.
     """
+    n_flows = N_FLOWS if n_flows is None else n_flows
     flows = [cc_cls() for _ in range(n_flows)]
     queue = 0.0
     hist_q, hist_util, hist_cwnd, drops = [], [], [], 0
@@ -145,6 +152,7 @@ def simulate(cc_cls, n_flows=4, sim_ms=SIM_MS, k=DCTCP_K):
 
 
 def main():
+    banner(84)
     print("=" * 84)
     print(f"瓶颈链路 {LINK_PKT_PER_MS:.0f} 包/ms | 基础 RTT {RTT_MS}ms | "
           f"BDP {BDP:.0f} 包 | 队列容量 {QUEUE_CAP} 包")

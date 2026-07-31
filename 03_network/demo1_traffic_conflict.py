@@ -9,17 +9,24 @@ demo1: RPC 小包 vs 集合通信大包 —— 队头阻塞与调度策略
 
 一句话: 一根网线上同时跑'搬家卡车'(AllReduce 大包)和'救护车'(RPC 小包).
 """
-import heapq
+import os
+import sys
+from collections import deque
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_float, banner  # noqa: E402
 
 np.seterr(all="ignore")
 
-LINK_GBPS = 100.0            # 100Gbps 链路
-SIM_MS = 2000.0              # 模拟 2 秒
-RPC_QPS = 20_000             # RPC 请求速率
-RPC_BYTES = 512              # RPC 小包: 512B
-BULK_MB = 4.0                # 单个集合通信块: 4MB
-BULK_PERIOD_MS = 2.0         # 训练每 2ms 发起一次(周期性)
+LINK_GBPS = env_float("LINK_GBPS", 100.0, "链路带宽(Gbps)")
+SIM_MS = env_float("SIM_MS", 2000.0, "模拟时长(ms)")
+RPC_QPS = env_int("RPC_QPS", 20_000, "RPC 请求速率")
+RPC_BYTES = env_int("RPC_BYTES", 512, "RPC 小包大小(字节)")
+BULK_MB = env_float("BULK_MB", 4.0, "单个集合通信块大小(MB)")
+BULK_PERIOD_MS = env_float("BULK_PERIOD_MS", 2.0, "集合通信发起周期(ms)")
+CHUNK_KB = env_float("CHUNK_KB", 4.0, "分片策略的片大小(KB)")
+CHUNK_LABEL = f"优先级+分片{CHUNK_KB:g}KB"
 
 
 def tx_time_ms(nbytes):
@@ -70,7 +77,9 @@ def simulate(events, policy, chunk_kb=None, wrr_weights=(1, 1)):
     关键建模点: 一个包一旦开始发送就**不可抢占**(store-and-forward),
     所以大包的发送时长直接决定了后来者的最坏等待时间. 这就是队头阻塞.
     """
-    rpc_q, bulk_q = [], []
+    # 用 deque 而不是 list: 分片开启后队列里可能有百万级的片,
+    # list.pop(0) 是 O(n), 会把模拟拖成平方复杂度.
+    rpc_q, bulk_q = deque(), deque()
     i, n = 0, len(events)
     now = 0.0
     rpc_lat, bulk_done = [], 0.0
@@ -118,7 +127,7 @@ def simulate(events, policy, chunk_kb=None, wrr_weights=(1, 1)):
             raise ValueError(policy)
 
         q = rpc_q if pick == "rpc" else bulk_q
-        arrive, nb = q.pop(0)
+        arrive, nb = q.popleft()
         start = max(now, arrive)
         dur = tx_time_ms(nb)
         now = start + dur
@@ -140,6 +149,7 @@ def simulate(events, policy, chunk_kb=None, wrr_weights=(1, 1)):
 
 
 def main():
+    banner(88)
     print("=" * 88)
     print(f"链路 {LINK_GBPS:.0f}Gbps | RPC: {RPC_QPS:,}QPS x {RPC_BYTES}B "
           f"| 集合通信: 每 {BULK_PERIOD_MS}ms 一个 {BULK_MB}MB 块")
@@ -166,8 +176,8 @@ def main():
         ("优先级(RPC优先)", dict(policy="priority")),
         ("加权轮转 1:1", dict(policy="wrr", wrr_weights=(1, 1))),
         ("加权轮转 4:1", dict(policy="wrr", wrr_weights=(4, 1))),
-        ("优先级+分片64KB", dict(policy="priority", chunk_kb=64)),
-        ("优先级+分片4KB", dict(policy="priority", chunk_kb=4)),
+        (f"优先级+分片{CHUNK_KB*16:g}KB", dict(policy="priority", chunk_kb=CHUNK_KB * 16)),
+        (CHUNK_LABEL, dict(policy="priority", chunk_kb=CHUNK_KB)),
     ]
 
     print(f"\n{'调度策略':<22}{'RPC P50':>11}{'RPC P99':>11}{'RPC P999':>12}"
@@ -184,7 +194,7 @@ def main():
     # ------------------------------------------------------------ 解读
     print("\n" + "-" * 88)
     f, p = results["FIFO 单队列"], results["优先级(RPC优先)"]
-    c = results["优先级+分片4KB"]
+    c = results[CHUNK_LABEL]
     bulk_us = tx_us(BULK_MB * 1e6)
     print(f"[1] 队头阻塞: FIFO 下 RPC 的 P999 = {f['p999']*1e3:.1f}us, "
           f"最大 {f['max']*1e3:.1f}us")
@@ -203,8 +213,8 @@ def main():
 
     print(f"\n[3] 真正治本的是分片: 切成 4KB 后 P999 = {c['p999']*1e3:.2f}us, "
           f"比优先级好 {(1-c['p999']/p['p999']):.1%}")
-    print(f"    因为不可抢占的时间窗口从 {bulk_us:.1f}us 缩到了 {tx_us(4*1024):.3f}us,")
-    print(f"    整整小了 {bulk_us/tx_us(4*1024):,.0f} 倍. 尾延迟随之等比例下降.")
+    print(f"    因为不可抢占的时间窗口从 {bulk_us:.1f}us 缩到了 {tx_us(CHUNK_KB*1024):.3f}us,")
+    print(f"    整整小了 {bulk_us/tx_us(CHUNK_KB*1024):,.0f} 倍. 尾延迟随之等比例下降.")
     print("    这条结论的一般形式: **尾延迟的下界 = 最大不可抢占单元的传输时间.**")
     print("    想降尾延迟, 就得缩小这个单元, 而不是调整排队顺序.")
     print("    代价: 分片增加包头开销和 CPU 中断次数(本 demo 未建模这部分成本),")
@@ -216,7 +226,7 @@ def main():
     print("    左半张表: 集合通信严格周期性到达(纯训练集群)")
     print("    右半张表: 集合通信泊松到达(弹性调度混部, 平均带宽完全相同)")
     print(f"\n  {'链路利用率':>10}|{'周期性 FIFO':>13}{'周期性 优先级':>15}|"
-          f"{'突发 FIFO':>12}{'突发 优先级':>14}{'突发 分片4KB':>15}")
+          f"{'突发 FIFO':>12}{'突发 优先级':>14}{'突发 分片'+f'{CHUNK_KB:g}KB':>15}")
     print("  " + "-" * 82)
     for period in [2.0, 1.0, 0.5, 0.4, 0.36, 0.345]:
         util = (rpc_gbps + (BULK_MB * 1e6) / (period / 1e3) * 8 / 1e9) / LINK_GBPS
@@ -226,7 +236,7 @@ def main():
         a2 = simulate(ev_p, policy="priority")["p999"] * 1e3
         b1 = simulate(ev_b, policy="fifo")["p999"] * 1e3
         b2 = simulate(ev_b, policy="priority")["p999"] * 1e3
-        b3 = simulate(ev_b, policy="priority", chunk_kb=4)["p999"] * 1e3
+        b3 = simulate(ev_b, policy="priority", chunk_kb=CHUNK_KB)["p999"] * 1e3
         print(f"  {util:>9.0%}|{a1:>11.0f}us{a2:>13.0f}us|"
               f"{b1:>10.0f}us{b2:>12.0f}us{b3:>13.1f}us")
 

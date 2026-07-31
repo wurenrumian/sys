@@ -12,13 +12,19 @@ demo3: 显存碎片 —— 为什么显存"还剩很多"却 OOM
 
 对比 4 种分配器在同一段不定长分配/释放序列上的表现.
 """
+import os
+import sys
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_float, banner  # noqa: E402
 
 np.seterr(all="ignore")
 
-GPU_MB = 4096          # 模拟 4GB 可用于 KV Cache 的显存
-N_OPS = 20_000         # 分配/释放操作数
-PAGE_MB = 4            # 分页分配器的页大小
+GPU_MB = env_int("GPU_MB", 4096, "模拟可用于 KV Cache 的显存(MB)")
+N_OPS = env_int("N_OPS", 20_000, "分配/释放操作数")
+PAGE_MB = env_float("PAGE_MB", 4, "分页分配器的页大小(MB)")
+PARETO_A = env_float("PARETO_A", 1.2, "请求大小的 Pareto 指数, 越小尾巴越长")
 
 
 # ================================================================ 分配器实现
@@ -172,7 +178,7 @@ class PagedAllocator:
 
 
 # ================================================================ 负载生成
-WATERMARK = 0.65   # 存活数据量始终不超过显存的 65%
+WATERMARK = env_float("WATERMARK", 0.65, "存活数据量占显存的上限水位")
 
 
 def gen_workload(seed=0, mode="skewed", watermark=None):
@@ -191,7 +197,7 @@ def gen_workload(seed=0, mode="skewed", watermark=None):
     for _ in range(N_OPS):
         if mode == "skewed":
             # 用户序列长度: 多数很短, 少数极长 (对应 KV Cache 大小)
-            size = float(np.clip(rng.pareto(1.2) * 6 + 1, 1, 400))
+            size = float(np.clip(rng.pareto(PARETO_A) * 6 + 1, 1, 400))
         else:
             size = float(rng.uniform(1, 60))
         # 只要还在水位以下就分配, 否则释放一个存活块
@@ -231,6 +237,7 @@ def run(alloc, ops):
 
 
 def main():
+    banner(84)
     print("=" * 84)
     print(f"显存碎片演示: {GPU_MB}MB 显存, {N_OPS:,} 次不定长分配/释放")
     print("=" * 84)

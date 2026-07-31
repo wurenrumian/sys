@@ -1,0 +1,1210 @@
+{
+  "title": "AI 基础设施 · 讲解与可验证演示",
+  "subtitle": "字节搜广推架构联合实验室 · AI基础设施方向",
+  "modules": [
+    {
+      "id": "00_overview",
+      "title": "总览 · 知识地图",
+      "hook": "三个方向其实是一次训练 step 的三段时间。先看这张地图再决定读哪里。",
+      "doc": "00_overview/README.md",
+      "demos": []
+    },
+    {
+      "id": "01_data_storage",
+      "title": "01 · 数据计算与存储中台",
+      "hook": "千亿级/日的行为数据 + 多模态：存不下、读不快、CPU 的 ETL 喂不饱 GPU。",
+      "doc": "01_data_storage/README.md",
+      "demos": [
+        {
+          "file": "01_data_storage/demo1_row_vs_col.py",
+          "title": "demo1 · 行存 vs 列存",
+          "hook": "训练只用 3/40 个字段时，按行存要把 100% 的字节都搬一遍。",
+          "runtime_s": 3.5,
+          "params": [
+            {
+              "name": "N_ROWS",
+              "label": "样本行数",
+              "type": "int",
+              "default": 200000,
+              "min": 10000,
+              "max": 500000,
+              "step": 10000
+            },
+            {
+              "name": "N_COLS",
+              "label": "字段数",
+              "type": "int",
+              "default": 40,
+              "min": 4,
+              "max": 80,
+              "step": 1
+            },
+            {
+              "name": "N_PROJ",
+              "label": "训练用到几个字段",
+              "type": "int",
+              "default": 3,
+              "min": 1,
+              "max": 40,
+              "step": 1
+            }
+          ],
+          "checks": [
+            {
+              "text": "投影扫描的 I/O 量降到 30% 以下（默认参数 = 3/40 = 7.5%）",
+              "re": "I/O 量降为 ([\\d.]+)%",
+              "cmp": "<",
+              "value": 30
+            },
+            {
+              "text": "列存整表压缩比 > 6x",
+              "re": "列存整表\\s*:\\s*([\\d.]+)x",
+              "cmp": ">",
+              "value": 6
+            },
+            {
+              "text": "单调时间戳列的压缩比 > 50x —— 同质数据放一起熵更低",
+              "re": "时间戳\\(单调\\)\\s+([\\d.]+)x",
+              "cmp": ">",
+              "value": 50
+            }
+          ]
+        },
+        {
+          "file": "01_data_storage/demo2_cache_tier.py",
+          "title": "demo2 · 多级存储与 Embedding Cache",
+          "hook": "Zipf 长尾下 1% 的缓存吃掉大半流量；但热点 churn 会让 LFU 的优势反转。",
+          "runtime_s": 5.0,
+          "params": [
+            {
+              "name": "N_KEYS",
+              "label": "Embedding 表 key 数",
+              "type": "int",
+              "default": 1000000,
+              "min": 10000,
+              "max": 5000000,
+              "step": 100000
+            },
+            {
+              "name": "N_REQ",
+              "label": "请求数",
+              "type": "int",
+              "default": 400000,
+              "min": 20000,
+              "max": 1000000,
+              "step": 20000
+            },
+            {
+              "name": "ZIPF_A",
+              "label": "Zipf 指数（越大越集中）",
+              "type": "float",
+              "default": 1.15,
+              "min": 1.01,
+              "max": 2.0,
+              "step": 0.01
+            },
+            {
+              "name": "CHURN_EVERY",
+              "label": "多少请求换一批热点",
+              "type": "int",
+              "default": 50000,
+              "min": 1000,
+              "max": 400000,
+              "step": 1000
+            },
+            {
+              "name": "CACHE_RATIO",
+              "label": "churn 实验的缓存容量占比",
+              "type": "float",
+              "default": 0.01,
+              "min": 0.001,
+              "max": 0.5,
+              "step": 0.001
+            }
+          ],
+          "checks": [
+            {
+              "text": "最热的 1% key 承接了 50% 以上的请求",
+              "re": "最热的 1% 承接了 ([\\d.]+)% 的请求",
+              "cmp": ">",
+              "value": 50
+            },
+            {
+              "text": "1% 容量的缓存命中率 > 60%（缓存在推荐场景性价比极高）",
+              "re": "1\\.0%\\s+[\\d,]+\\s+([\\d.]+)%",
+              "cmp": ">",
+              "value": 60
+            },
+            {
+              "text": "热点 churn 下 LFU 的掉幅比 LRU 更大（陈旧计数挡住新热点）",
+              "re": "LFU\\s+[\\d.]+%\\s+[\\d.]+%\\s+(-[\\d.]+)%",
+              "cmp": "<",
+              "value": -2.3
+            }
+          ]
+        },
+        {
+          "file": "01_data_storage/demo3_data_quality.py",
+          "title": "demo3 · DCAI：数据事故如何静悄悄打掉 AUC",
+          "hook": "PSI 漏掉了两类事故 —— AUC 掉了 2 个点它还报“正常”。",
+          "runtime_s": 0.5,
+          "params": [
+            {
+              "name": "N_TRAIN",
+              "label": "训练样本数",
+              "type": "int",
+              "default": 60000,
+              "min": 5000,
+              "max": 300000,
+              "step": 5000
+            },
+            {
+              "name": "N_SERVE",
+              "label": "线上样本数",
+              "type": "int",
+              "default": 30000,
+              "min": 5000,
+              "max": 200000,
+              "step": 5000
+            },
+            {
+              "name": "N_FEAT",
+              "label": "特征维数",
+              "type": "int",
+              "default": 12,
+              "min": 5,
+              "max": 64,
+              "step": 1
+            },
+            {
+              "name": "SKEW_RATIO",
+              "label": "离在线不一致的污染比例",
+              "type": "float",
+              "default": 0.3,
+              "min": 0.0,
+              "max": 1.0,
+              "step": 0.05
+            },
+            {
+              "name": "PSI_BINS",
+              "label": "PSI 分桶数",
+              "type": "int",
+              "default": 10,
+              "min": 3,
+              "max": 50,
+              "step": 1
+            }
+          ],
+          "checks": [
+            {
+              "text": "事故1（特征全变默认值）被 PSI 抓到：PSI > 1",
+              "re": "特征缺失.*?[\\d.]+\\s+-[\\d.]+\\s+([\\d.]+)",
+              "cmp": ">",
+              "value": 1.0
+            },
+            {
+              "text": "事故3（离在线不一致）AUC 掉了，但 PSI < 0.1 判定为“正常”",
+              "re": "离在线不一致.*?[\\d.]+\\s+-[\\d.]+\\s+([\\d.]+)\\s+feat",
+              "cmp": "<",
+              "value": 0.1
+            },
+            {
+              "text": "事故3 的 AUC 掉幅超过 1 个点（PSI 却毫无反应）",
+              "re": "但 AUC 掉了 -([\\d.]+)",
+              "cmp": ">",
+              "value": 0.01
+            },
+            {
+              "text": "特征污染 100% 时 AUC 单调下滑，而 PSI 全程约等于 0",
+              "re": "100%\\s+([\\d.]+)\\s+[\\d.]+\\s+-[\\d.]+",
+              "cmp": "<",
+              "value": 0.05
+            }
+          ]
+        },
+        {
+          "file": "01_data_storage/demo4_jagged_padding.py",
+          "title": "demo4 · 不定长序列的 padding 浪费",
+          "hook": "动态 padding 几乎白干；真正有效的是按长度排序分桶。",
+          "runtime_s": 0.3,
+          "params": [
+            {
+              "name": "N_USERS",
+              "label": "样本数",
+              "type": "int",
+              "default": 200000,
+              "min": 10000,
+              "max": 500000,
+              "step": 10000
+            },
+            {
+              "name": "MAX_LEN",
+              "label": "序列长度上限",
+              "type": "int",
+              "default": 1024,
+              "min": 64,
+              "max": 4096,
+              "step": 64
+            },
+            {
+              "name": "BATCH",
+              "label": "batch size",
+              "type": "int",
+              "default": 512,
+              "min": 8,
+              "max": 8192,
+              "step": 8
+            },
+            {
+              "name": "SIGMA",
+              "label": "长度分布长尾程度",
+              "type": "float",
+              "default": 1.6,
+              "min": 0.2,
+              "max": 3.0,
+              "step": 0.1
+            }
+          ],
+          "checks": [
+            {
+              "text": "全局 padding 的槽位放大 > 5x（绝大部分算力烧在补零上）",
+              "re": "全局 padding.*?([\\d.]+)x",
+              "cmp": ">",
+              "value": 5
+            },
+            {
+              "text": "动态 padding 几乎没有收益：放大倍数仍 > 5x",
+              "re": "动态 padding \\(补到批内 max\\).*?([\\d.]+)x",
+              "cmp": ">",
+              "value": 5
+            },
+            {
+              "text": "排序分桶把放大倍数压到 1.5x 以内，逼近 Jagged 的理论下限",
+              "re": "排序分桶 \\+ 动态 padding.*?([\\d.]+)x",
+              "cmp": "<",
+              "value": 1.5
+            },
+            {
+              "text": "实测 jagged pooling 比 padded 快 2x 以上",
+              "re": "耗时差 ([\\d.]+)x",
+              "cmp": ">",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "file": "01_data_storage/demo5_etl_overlap.py",
+          "title": "demo5 · CPU 喂不饱 GPU：重叠、木桶与抖动",
+          "hook": "平均 ETL 比 GPU 快，GPU 照样挨饿 —— 因为抖动存不下来。",
+          "runtime_s": 0.3,
+          "params": [
+            {
+              "name": "N_STEPS",
+              "label": "模拟 step 数",
+              "type": "int",
+              "default": 3000,
+              "min": 200,
+              "max": 20000,
+              "step": 100
+            },
+            {
+              "name": "ETL_MS",
+              "label": "单批 ETL 耗时均值(ms)",
+              "type": "float",
+              "default": 90,
+              "min": 5,
+              "max": 1000,
+              "step": 5
+            },
+            {
+              "name": "GPU_MS",
+              "label": "单批 GPU 耗时(ms)",
+              "type": "float",
+              "default": 100,
+              "min": 5,
+              "max": 1000,
+              "step": 5
+            },
+            {
+              "name": "ETL_CV",
+              "label": "ETL 抖动（变异系数）",
+              "type": "float",
+              "default": 0.6,
+              "min": 0.0,
+              "max": 3.0,
+              "step": 0.1
+            },
+            {
+              "name": "WORKERS",
+              "label": "dataloader worker 数",
+              "type": "int",
+              "default": 4,
+              "min": 1,
+              "max": 64,
+              "step": 1
+            },
+            {
+              "name": "QUEUE",
+              "label": "prefetch 槽位数",
+              "type": "int",
+              "default": 2,
+              "min": 1,
+              "max": 64,
+              "step": 1
+            }
+          ],
+          "checks": [
+            {
+              "text": "重叠把端到端加速到 1.3x 以上（没有一行代码变快）",
+              "re": "端到端快了 ([\\d.]+)x",
+              "cmp": ">",
+              "value": 1.3
+            },
+            {
+              "text": "worker 加过拐点后收益归零（出现 +0.0% 的行）",
+              "re": "比上一档快 \\+(0\\.0)%"
+            },
+            {
+              "text": "队列槽位数是 worker 并行度的硬上限",
+              "re": "给 8 个槽位时 = ([\\d.]+)ms",
+              "cmp": "<",
+              "value": 200
+            },
+            {
+              "text": "优化非瓶颈（worker 翻倍）的收益精确等于 1.00x",
+              "re": "worker 数翻倍 \\(加 CPU 核\\)\\s+[\\d.]+ms\\s+(1\\.00)x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "02_compile",
+      "title": "02 · 基础库团队 - 编译方向",
+      "hook": "全链路 Python 胶水层拖慢迭代与延迟；显存碎片 + 动态 shape 让编译收益拿不到手。",
+      "doc": "02_compile/README.md",
+      "demos": [
+        {
+          "file": "02_compile/demo1_python_overhead.py",
+          "title": "demo1 · Python 解释器开销有多大",
+          "hook": "两种“看起来更优”的手工优化，分别慢了 2.5x 和 7.7x。",
+          "runtime_s": 1.0,
+          "params": [
+            {
+              "name": "N",
+              "label": "元素个数",
+              "type": "int",
+              "default": 2000000,
+              "min": 100000,
+              "max": 8000000,
+              "step": 100000
+            },
+            {
+              "name": "REPEAT",
+              "label": "重复次数（取最小值）",
+              "type": "int",
+              "default": 3,
+              "min": 1,
+              "max": 10,
+              "step": 1
+            },
+            {
+              "name": "SUB",
+              "label": "纯 Python 实测子集",
+              "type": "int",
+              "default": 200000,
+              "min": 10000,
+              "max": 1000000,
+              "step": 10000
+            }
+          ],
+          "checks": [
+            {
+              "text": "numpy 向量化相对纯 Python 加速 > 20x",
+              "re": "numpy 向量化\\s+[\\d.]+\\s+(\\d+)x",
+              "cmp": ">",
+              "value": 20
+            },
+            {
+              "text": "布尔掩码写法反而更慢（加速比明显低于朴素向量化）",
+              "re": "numpy 布尔掩码\\s+[\\d.]+\\s+(\\d+)x",
+              "cmp": "<",
+              "value": 30
+            },
+            {
+              "text": "向量化之后算术强度 < 1 FLOP/Byte —— 已经是 memory-bound",
+              "re": "算术强度 ([\\d.]+) FLOP/Byte",
+              "cmp": "<",
+              "value": 1.0
+            }
+          ]
+        },
+        {
+          "file": "02_compile/demo2_operator_fusion.py",
+          "title": "demo2 · 算子融合：向量化之后的下一道墙",
+          "hook": "手写分块融合比不融合还慢；真正的融合只能发生在编译产物内部。",
+          "runtime_s": 4.0,
+          "params": [
+            {
+              "name": "REPEAT",
+              "label": "重复次数",
+              "type": "int",
+              "default": 5,
+              "min": 1,
+              "max": 20,
+              "step": 1
+            },
+            {
+              "name": "N_MAIN",
+              "label": "块扫描规模",
+              "type": "int",
+              "default": 8000000,
+              "min": 1000000,
+              "max": 32000000,
+              "step": 1000000
+            },
+            {
+              "name": "USE_TORCH",
+              "label": "是否跑 torch.compile（慢）",
+              "type": "bool",
+              "default": true
+            }
+          ],
+          "checks": [
+            {
+              "text": "手写分块融合的加速比 < 1（比不融合还慢）",
+              "re": "!! 注意: '分块融合'这一列的加速比 < 1"
+            },
+            {
+              "text": "融合的理论访存下限是 4 趟（未融合 8 趟）",
+              "re": "分块融合\\s+1\\s+(4)\\s"
+            },
+            {
+              "text": "torch.compile 真正拿到了 > 1.5x 的融合收益",
+              "re": "torch\\.compile\\s+:\\s+[\\d.]+ ms\\s+\\(([\\d.]+)x\\)",
+              "cmp": ">",
+              "value": 1.5
+            }
+          ]
+        },
+        {
+          "file": "02_compile/demo3_gpu_mem_frag.py",
+          "title": "demo3 · 显存碎片：为什么显存够却 OOM",
+          "hook": "分页不是消灭碎片，而是把外部碎片换成可以用页大小调节的内部碎片。",
+          "runtime_s": 4.5,
+          "params": [
+            {
+              "name": "GPU_MB",
+              "label": "可用显存(MB)",
+              "type": "int",
+              "default": 4096,
+              "min": 512,
+              "max": 32768,
+              "step": 512
+            },
+            {
+              "name": "N_OPS",
+              "label": "分配/释放次数",
+              "type": "int",
+              "default": 20000,
+              "min": 2000,
+              "max": 50000,
+              "step": 1000
+            },
+            {
+              "name": "PAGE_MB",
+              "label": "分页大小(MB)",
+              "type": "float",
+              "default": 4,
+              "min": 0.125,
+              "max": 64,
+              "step": 0.125
+            },
+            {
+              "name": "PARETO_A",
+              "label": "请求大小长尾程度",
+              "type": "float",
+              "default": 1.2,
+              "min": 0.5,
+              "max": 3.0,
+              "step": 0.1
+            },
+            {
+              "name": "WATERMARK",
+              "label": "存活数据水位",
+              "type": "float",
+              "default": 0.65,
+              "min": 0.3,
+              "max": 0.95,
+              "step": 0.05
+            }
+          ],
+          "checks": [
+            {
+              "text": "连续分配器在 80% 水位就开始因外部碎片 OOM（理想分配器应为 0）",
+              "re": "\\n\\s+80%\\s+(\\d+)\\s",
+              "cmp": ">",
+              "value": 0
+            },
+            {
+              "text": "Buddy 的内部碎片显著（向上取整到 2 的幂）",
+              "re": "Buddy\\(2的幂\\)\\s+[\\d,]+\\s+[\\d]+MB\\s+[\\d.]+%\\s+([\\d.]+)%",
+              "cmp": ">",
+              "value": 15
+            },
+            {
+              "text": "Paged 的外部碎片率为 0",
+              "re": "Paged\\([^)]*\\)\\s+[\\d,]+\\s+\\d+MB\\s+(0\\.0)%"
+            },
+            {
+              "text": "把页减小到 256KB 后，高水位下 OOM 显著减少",
+              "re": "95%\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s+(\\d+)",
+              "cmp": "<",
+              "value": 20
+            }
+          ]
+        },
+        {
+          "file": "02_compile/demo4_dynamic_batch.py",
+          "title": "demo4 · 动态批处理：吞吐与 P99 的取舍",
+          "hook": "固定批策略的低谷 P99 反而比尖峰更差 —— 系统最闲时用户等最久。",
+          "runtime_s": 0.3,
+          "params": [
+            {
+              "name": "SIM_MS",
+              "label": "模拟时长(ms)",
+              "type": "int",
+              "default": 60000,
+              "min": 5000,
+              "max": 300000,
+              "step": 5000
+            },
+            {
+              "name": "BASE_QPS",
+              "label": "平均 QPS",
+              "type": "int",
+              "default": 800,
+              "min": 50,
+              "max": 20000,
+              "step": 50
+            },
+            {
+              "name": "SPIKE_X",
+              "label": "尖峰倍数",
+              "type": "float",
+              "default": 3.0,
+              "min": 1.0,
+              "max": 10.0,
+              "step": 0.5
+            },
+            {
+              "name": "GPU_FIXED_MS",
+              "label": "单批固定开销(ms)",
+              "type": "float",
+              "default": 2.0,
+              "min": 0.1,
+              "max": 20,
+              "step": 0.1
+            },
+            {
+              "name": "GPU_PER_REQ_MS",
+              "label": "每条请求边际耗时(ms)",
+              "type": "float",
+              "default": 0.012,
+              "min": 0.001,
+              "max": 1.0,
+              "step": 0.001
+            }
+          ],
+          "checks": [
+            {
+              "text": "自适应策略的 P999 < 20ms",
+              "re": "自适应\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+([\\d.]+)ms",
+              "cmp": "<",
+              "value": 20
+            },
+            {
+              "text": "固定大批（bs=256）的 P999 高出两个数量级",
+              "re": "固定批 bs=256\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+([\\d.]+)ms",
+              "cmp": ">",
+              "value": 100
+            },
+            {
+              "text": "固定批策略的低谷 P99 比尖峰 P99 还差（反直觉）",
+              "re": "^  固定批 bs=256\\s+([\\d.]+)ms\\s+([\\d.]+)ms",
+              "cmp": "gt_group2"
+            }
+          ]
+        },
+        {
+          "file": "02_compile/demo5_dynamic_shape.py",
+          "title": "demo5 · 动态 shape：编译收益为什么拿不到",
+          "hook": "缓存命中率 97% 听起来很高，但 P99 是 401ms —— SLA 按 P99 签，不按命中率。",
+          "runtime_s": 1.0,
+          "params": [
+            {
+              "name": "N_REQ",
+              "label": "请求数",
+              "type": "int",
+              "default": 20000,
+              "min": 2000,
+              "max": 200000,
+              "step": 1000
+            },
+            {
+              "name": "MAX_LEN",
+              "label": "序列长度上限",
+              "type": "int",
+              "default": 1024,
+              "min": 64,
+              "max": 8192,
+              "step": 64
+            },
+            {
+              "name": "SIGMA",
+              "label": "长度分布长尾程度",
+              "type": "float",
+              "default": 1.2,
+              "min": 0.2,
+              "max": 3.0,
+              "step": 0.1
+            },
+            {
+              "name": "COMPILE_MS",
+              "label": "编译一个 shape 的耗时(ms)",
+              "type": "float",
+              "default": 400,
+              "min": 10,
+              "max": 5000,
+              "step": 10
+            },
+            {
+              "name": "RELOAD_EVERY",
+              "label": "多少请求热更新一次(0=不更新)",
+              "type": "int",
+              "default": 0,
+              "min": 0,
+              "max": 20000,
+              "step": 100
+            }
+          ],
+          "checks": [
+            {
+              "text": "“每 shape 特化”的 P99 被编译冷启动打爆（> 100ms）",
+              "re": "每 shape 特化编译\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+([\\d.]+)ms",
+              "cmp": ">",
+              "value": 100
+            },
+            {
+              "text": "分桶把 P999 压到 10ms 以内",
+              "re": "2的幂分桶\\([^)]*\\)\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+([\\d.]+)ms",
+              "cmp": "<",
+              "value": 10
+            },
+            {
+              "text": "桶数扫描是 U 形曲线：桶太少和太多都变差",
+              "re": "几何分桶 k=8"
+            },
+            {
+              "text": "等比分桶的 padding 浪费明显小于等频（分位数）分桶",
+              "re": "几何分桶浪费 ([\\d.]+)%",
+              "cmp": "<",
+              "value": 40
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "03_network",
+      "title": "03 · 基础库团队 - 网络方向",
+      "hook": "一根网线上同时跑“搬家卡车”和“救护车”：训练大包与在线 RPC 小包互相打架。",
+      "doc": "03_network/README.md",
+      "demos": [
+        {
+          "file": "03_network/demo1_traffic_conflict.py",
+          "title": "demo1 · 队头阻塞与调度策略",
+          "hook": "优先级队列在低利用率下改善 0% —— 包不可抢占，真正有效的是分片。",
+          "runtime_s": 8.5,
+          "params": [
+            {
+              "name": "LINK_GBPS",
+              "label": "链路带宽(Gbps)",
+              "type": "float",
+              "default": 100,
+              "min": 10,
+              "max": 800,
+              "step": 10
+            },
+            {
+              "name": "SIM_MS",
+              "label": "模拟时长(ms)",
+              "type": "float",
+              "default": 2000,
+              "min": 200,
+              "max": 5000,
+              "step": 100
+            },
+            {
+              "name": "RPC_QPS",
+              "label": "RPC 速率",
+              "type": "int",
+              "default": 20000,
+              "min": 1000,
+              "max": 200000,
+              "step": 1000
+            },
+            {
+              "name": "RPC_BYTES",
+              "label": "RPC 包大小(字节)",
+              "type": "int",
+              "default": 512,
+              "min": 64,
+              "max": 8192,
+              "step": 64
+            },
+            {
+              "name": "BULK_MB",
+              "label": "集合通信块大小(MB)",
+              "type": "float",
+              "default": 4.0,
+              "min": 0.5,
+              "max": 8.0,
+              "step": 0.5
+            },
+            {
+              "name": "BULK_PERIOD_MS",
+              "label": "集合通信周期(ms)",
+              "type": "float",
+              "default": 2.0,
+              "min": 0.5,
+              "max": 20,
+              "step": 0.1
+            },
+            {
+              "name": "CHUNK_KB",
+              "label": "分片大小(KB)",
+              "type": "float",
+              "default": 4.0,
+              "min": 1,
+              "max": 256,
+              "step": 1
+            }
+          ],
+          "checks": [
+            {
+              "text": "FIFO 下 RPC 的 P999 ≈ 一个大包的发送时间（队头阻塞）",
+              "re": "FIFO 下 RPC 的 P999 = ([\\d.]+)us",
+              "cmp": ">",
+              "value": 100
+            },
+            {
+              "text": "优先级队列相比 FIFO 的改善 < 5% —— 几乎没用",
+              "re": "相比 FIFO 改善 ([\\d.]+)%",
+              "cmp": "<",
+              "value": 5
+            },
+            {
+              "text": "分片后 P999 比优先级好 90% 以上",
+              "re": "比优先级好 ([\\d.]+)%",
+              "cmp": ">",
+              "value": 90
+            },
+            {
+              "text": "周期性流量下即使推高利用率，P999 也不恶化（决定因素是突发性）",
+              "re": "93%\\|\\s*(\\d+)us",
+              "cmp": "<",
+              "value": 400
+            }
+          ]
+        },
+        {
+          "file": "03_network/demo2_allreduce.py",
+          "title": "demo2 · AllReduce：千卡后效率为什么变低",
+          "hook": "Ring 带宽最优、Tree 延迟最优；分层 AllReduce 把慢链路上的数据量降到 1/8。",
+          "runtime_s": 0.2,
+          "params": [
+            {
+              "name": "D_GB",
+              "label": "梯度数据量(GB)",
+              "type": "float",
+              "default": 1.0,
+              "min": 0.01,
+              "max": 100,
+              "step": 0.01
+            },
+            {
+              "name": "NVLINK_GBPS",
+              "label": "机内 NVLink(GB/s)",
+              "type": "float",
+              "default": 450,
+              "min": 50,
+              "max": 1000,
+              "step": 10
+            },
+            {
+              "name": "IB_GBPS",
+              "label": "机间 IB(GB/s)",
+              "type": "float",
+              "default": 25,
+              "min": 1,
+              "max": 200,
+              "step": 1
+            },
+            {
+              "name": "IB_LAT_US",
+              "label": "机间单跳延迟(us)",
+              "type": "float",
+              "default": 2.5,
+              "min": 0.1,
+              "max": 50,
+              "step": 0.1
+            },
+            {
+              "name": "GPUS_PER_NODE",
+              "label": "每机卡数",
+              "type": "int",
+              "default": 8,
+              "min": 2,
+              "max": 64,
+              "step": 1
+            }
+          ],
+          "checks": [
+            {
+              "text": "Naive 中心汇聚完全不可扩展（4096 卡耗时爆炸）",
+              "re": "\\n\\s+4096\\s+([\\d.]+)ms",
+              "cmp": ">",
+              "value": 10000
+            },
+            {
+              "text": "小数据量时树赢，大数据量时 Ring 赢（交叉点存在）",
+              "re": "10MB.*?Ring 赢"
+            },
+            {
+              "text": "分层 AllReduce 相对扁平 Ring 有明显加速",
+              "re": "分层 AllReduce\\s+:?\\s*[\\d.]+ ms\\s+\\(([\\d.]+)x 加速\\)",
+              "cmp": ">",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "file": "03_network/demo3_congestion.py",
+          "title": "demo3 · 拥塞控制：一个算法服务不了两类流量",
+          "hook": "队列深度和尾延迟几乎是一回事；而 RPC 要浅队列、大流要深队列。",
+          "runtime_s": 0.3,
+          "params": [
+            {
+              "name": "LINK_PKT_PER_MS",
+              "label": "链路速率(包/ms)",
+              "type": "float",
+              "default": 100,
+              "min": 10,
+              "max": 1000,
+              "step": 10
+            },
+            {
+              "name": "RTT_MS",
+              "label": "基础 RTT(ms)",
+              "type": "float",
+              "default": 1.0,
+              "min": 0.1,
+              "max": 20,
+              "step": 0.1
+            },
+            {
+              "name": "QUEUE_CAP",
+              "label": "队列容量(包)",
+              "type": "int",
+              "default": 500,
+              "min": 20,
+              "max": 5000,
+              "step": 20
+            },
+            {
+              "name": "DCTCP_K",
+              "label": "DCTCP 标记阈值 K(包)",
+              "type": "int",
+              "default": 20,
+              "min": 1,
+              "max": 500,
+              "step": 1
+            },
+            {
+              "name": "N_FLOWS",
+              "label": "并发流数",
+              "type": "int",
+              "default": 4,
+              "min": 1,
+              "max": 64,
+              "step": 1
+            },
+            {
+              "name": "SIM_MS",
+              "label": "模拟时长(ms)",
+              "type": "int",
+              "default": 4000,
+              "min": 500,
+              "max": 20000,
+              "step": 500
+            }
+          ],
+          "checks": [
+            {
+              "text": "Reno 把队列填得很深（bufferbloat）",
+              "re": "Reno \\(丢包驱动\\)\\s+[\\d.]+%\\s+(\\d+)包",
+              "cmp": ">",
+              "value": 30
+            },
+            {
+              "text": "DCTCP 的平均队列显著更浅",
+              "re": "DCTCP \\(ECN驱动\\)\\s+[\\d.]+%\\s+(\\d+)包",
+              "cmp": "<",
+              "value": 20
+            },
+            {
+              "text": "DCTCP 在浅队列下仍保持高利用率（> 90%）",
+              "re": "DCTCP \\(ECN驱动\\)\\s+([\\d.]+)%",
+              "cmp": ">",
+              "value": 90
+            }
+          ]
+        },
+        {
+          "file": "03_network/demo4_incast.py",
+          "title": "demo4 · Incast 崩塌与尾延迟放大",
+          "hook": "加大缓冲把“每次都炸”变成“偶尔炸”；单分片 P99=1%，扇出 100 就有 63% 的请求踩雷。",
+          "runtime_s": 0.5,
+          "params": [
+            {
+              "name": "N_REQ",
+              "label": "请求数",
+              "type": "int",
+              "default": 20000,
+              "min": 1000,
+              "max": 100000,
+              "step": 1000
+            },
+            {
+              "name": "FANOUT",
+              "label": "扇出度",
+              "type": "int",
+              "default": 64,
+              "min": 2,
+              "max": 512,
+              "step": 1
+            },
+            {
+              "name": "RESP_KB",
+              "label": "单分片响应(KB)",
+              "type": "float",
+              "default": 32,
+              "min": 1,
+              "max": 512,
+              "step": 1
+            },
+            {
+              "name": "BUFFER_KB",
+              "label": "交换机缓冲(KB)",
+              "type": "float",
+              "default": 1024,
+              "min": 64,
+              "max": 16384,
+              "step": 64
+            },
+            {
+              "name": "LINK_GBPS",
+              "label": "接收网口(Gbps)",
+              "type": "float",
+              "default": 25,
+              "min": 1,
+              "max": 400,
+              "step": 1
+            },
+            {
+              "name": "RTO_MS",
+              "label": "TCP 超时重传(ms)",
+              "type": "float",
+              "default": 200,
+              "min": 1,
+              "max": 500,
+              "step": 1
+            },
+            {
+              "name": "SHARD_P99_X",
+              "label": "单分片 p99 是中位数的几倍",
+              "type": "float",
+              "default": 10,
+              "min": 2,
+              "max": 100,
+              "step": 1
+            }
+          ],
+          "checks": [
+            {
+              "text": "低扇出时零丢包、吞吐正常",
+              "re": "\\n\\s+8\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+(0\\.0)%"
+            },
+            {
+              "text": "扇出越过临界点后吞吐断崖式崩塌（< 1 Gbps）",
+              "re": "\\n\\s+64\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+[\\d.]+%\\s+([\\d.]+)",
+              "cmp": "<",
+              "value": 1.0
+            },
+            {
+              "text": "应用层限并发把 P999 压到 10ms 以内",
+              "re": "应用层限并发 W=16\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+([\\d.]+)ms",
+              "cmp": "<",
+              "value": 10
+            },
+            {
+              "text": "扇出 100 时撞上慢分片的概率 > 50%（tail at scale）",
+              "re": "\\n\\s+100\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+([\\d.]+)%",
+              "cmp": ">",
+              "value": 50
+            },
+            {
+              "text": "对冲请求只多打 ~5% 负载就大幅压低尾延迟",
+              "re": "p95 后对冲\\s+[\\d.]+ms\\s+[\\d.]+ms\\s+([\\d.]+)ms",
+              "cmp": "<",
+              "value": 25
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "04_endtoend",
+      "title": "04 · 端到端：一次 step 的时间预算",
+      "hook": "把三个方向串成一张账单：瓶颈在哪、优化谁有用、瓶颈会随什么迁移。",
+      "doc": "04_endtoend/README.md",
+      "demos": [
+        {
+          "file": "04_endtoend/demo1_step_budget.py",
+          "title": "demo1 · Roofline + step 时间预算",
+          "hook": "推荐模型 MFU 只有百分之几不是 bug，是模型形态决定的。",
+          "runtime_s": 0.2,
+          "params": [
+            {
+              "name": "N_GPU",
+              "label": "训练卡数",
+              "type": "int",
+              "default": 512,
+              "min": 1,
+              "max": 8192,
+              "step": 1
+            },
+            {
+              "name": "DENSE_PARAMS_M",
+              "label": "稠密参数(百万)",
+              "type": "float",
+              "default": 300,
+              "min": 1,
+              "max": 100000,
+              "step": 10
+            },
+            {
+              "name": "BATCH_PER_GPU",
+              "label": "单卡 batch",
+              "type": "int",
+              "default": 1024,
+              "min": 16,
+              "max": 262144,
+              "step": 16
+            },
+            {
+              "name": "SEQ_LEN",
+              "label": "平均序列长度",
+              "type": "int",
+              "default": 128,
+              "min": 8,
+              "max": 4096,
+              "step": 8
+            },
+            {
+              "name": "EMB_DIM",
+              "label": "Embedding 维度",
+              "type": "int",
+              "default": 128,
+              "min": 8,
+              "max": 1024,
+              "step": 8
+            },
+            {
+              "name": "NET_GBS",
+              "label": "网络带宽(GB/s)",
+              "type": "float",
+              "default": 25,
+              "min": 1,
+              "max": 500,
+              "step": 1
+            },
+            {
+              "name": "STORAGE_GBS",
+              "label": "样本读取带宽(GB/s)",
+              "type": "float",
+              "default": 2,
+              "min": 0.1,
+              "max": 50,
+              "step": 0.1
+            },
+            {
+              "name": "GPU_TFLOPS",
+              "label": "单卡算力(TFLOPS)",
+              "type": "float",
+              "default": 989,
+              "min": 10,
+              "max": 5000,
+              "step": 10
+            },
+            {
+              "name": "GPU_BW_GBS",
+              "label": "单卡 HBM 带宽(GB/s)",
+              "type": "float",
+              "default": 3350,
+              "min": 100,
+              "max": 10000,
+              "step": 50
+            }
+          ],
+          "checks": [
+            {
+              "text": "Embedding lookup 的算术强度为 0 —— 纯搬运，不是计算",
+              "re": "Embedding lookup\\s+(0\\.0)\\s"
+            },
+            {
+              "text": "只有大 GEMM 是 compute-bound，其余算子都在等内存",
+              "re": "GEMM \\(M=N=K=8192\\)[^\\n]*compute-bound"
+            },
+            {
+              "text": "默认场景下 MFU < 10%（推荐是搬运型负载）",
+              "re": "完全不重叠\\s+[\\d.]+ms\\s+([\\d.]+)%",
+              "cmp": "<",
+              "value": 10
+            },
+            {
+              "text": "优化非瓶颈环节（存储）的端到端收益 ≈ 1.00x",
+              "re": "存储/ETL 快 2x[^\\n]*?([\\d.]+)x",
+              "cmp": "<",
+              "value": 1.1
+            },
+            {
+              "text": "卡数增加时并行效率单调下降（通信占比上升）",
+              "re": "\\n\\s+4096\\s+[^\\n]*?([\\d.]+)%\\s+通信",
+              "cmp": "<",
+              "value": 30
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "99_learning",
+      "title": "学习路径 · 面试问答 · 资料",
+      "hook": "一条从零到能答的学习路线：读什么、按什么顺序、常见追问和参考答案。",
+      "doc": "99_learning/README.md",
+      "demos": []
+    }
+  ]
+}

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 依次运行全部 demo。用法: bash run_all.sh  或  bash run_all.sh 01
+# 依次运行全部 demo。用法: bash run_all.sh  或  bash run_all.sh 03
+#
+# 想调参、想边跑边逐条验证结论, 用网站更方便:
+#     python3 site/serve.py --open
 set -u
 cd "$(dirname "$0")"
 

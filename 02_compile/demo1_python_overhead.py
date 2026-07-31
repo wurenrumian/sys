@@ -10,13 +10,19 @@ demo1: Python 解释器开销 —— "全链路都有 Python 参与"到底代价
 任务: 一个典型的推荐特征交叉计算  score = Σ (user_emb[i] * item_emb[i]) 后接 ReLU 与加权,
      用 5 种写法实现, 逐级展示"把循环下沉到编译代码里"能拿回多少性能.
 """
+import os
+import sys
 import time
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, banner  # noqa: E402
+
 np.seterr(all="ignore")  # numpy2.0 + Accelerate 的伪 FP 告警
 
-N = 2_000_000
-REPEAT = 3
+N = env_int("N", 2_000_000, "元素个数")
+REPEAT = env_int("REPEAT", 3, "每种写法重复次数(取最小值)")
+SUB = min(env_int("SUB", 200_000, "纯 Python 版实测的子集大小(其余靠线性外推)"), N)
 
 rng = np.random.default_rng(0)
 a = rng.random(N, dtype=np.float32)
@@ -90,6 +96,7 @@ def v5_torch(a, b, c):
 
 
 def main():
+    banner(78)
     print("=" * 78)
     print(f"任务: {N:,} 个元素的特征交叉 + 条件加权 (含一个业务分支)")
     print("=" * 78)
@@ -97,7 +104,6 @@ def main():
     results = []
 
     # 纯 Python 太慢, 只跑一个子集再线性外推, 否则这个 demo 要跑几十秒
-    SUB = 200_000
     t, r1 = bench(v1_pure_python, a_list[:SUB], b_list[:SUB], c_list[:SUB], repeat=1)
     t_extrap = t * (N / SUB)
     results.append(("纯 Python 循环", t_extrap, r1 * (N / SUB), f"(实测 {SUB:,} 元素后线性外推)"))

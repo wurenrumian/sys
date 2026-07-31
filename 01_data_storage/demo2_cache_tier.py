@@ -11,12 +11,19 @@ demo2: 多级存储 + Embedding Cache —— 长尾分布下, 缓存到底值多
 结论预览: 推荐场景的访问是极度 Zipf 的, 1% 容量的缓存就能吃掉大半流量;
          而存储层级之间的延迟差是数量级的, 所以"提升命中率"永远比"让某层更快"划算.
 """
+import os
+import sys
 from collections import OrderedDict, defaultdict
 import numpy as np
 
-N_KEYS = 1_000_000       # Embedding 表里的 item 数
-N_REQ = 400_000          # 请求数
-ZIPF_A = 1.15            # 推荐场景实测的头部集中度大致在这个量级
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_float, banner  # noqa: E402
+
+N_KEYS = env_int("N_KEYS", 1_000_000, "Embedding 表里的 item 数")
+N_REQ = env_int("N_REQ", 400_000, "请求数")
+ZIPF_A = env_float("ZIPF_A", 1.15, "Zipf 指数, 越大头部越集中")
+CHURN_EVERY = env_int("CHURN_EVERY", 50_000, "每多少请求换一批热点(热点churn)")
+CACHE_RATIO = env_float("CACHE_RATIO", 0.01, "churn 实验用的缓存容量占比")
 
 # 存储金字塔: (名字, 单次访问延迟 us, 单位容量相对成本)
 TIERS = [
@@ -134,6 +141,7 @@ def effective_latency(hit_rates):
 
 
 def main():
+    banner(78)
     print("=" * 78)
     print(f"Embedding 表 {N_KEYS:,} key, 请求 {N_REQ:,} 条, Zipf(a={ZIPF_A}) 长尾分布")
     print("=" * 78)
@@ -157,9 +165,9 @@ def main():
     print("  -> 命中率对容量是强凹的: 前 1% 的容量买到了绝大部分收益, 之后急剧衰减")
 
     # ---------- 2. 热点 churn 时 LRU/LFU 谁更稳 ----------
-    print("\n[2] 热点 churn (每 5 万请求换一批热点, 模拟新内容爆火/旧热点过气)")
-    tr2 = gen_trace(churn_every=50_000)
-    cap = int(N_KEYS * 0.01)
+    print(f"\n[2] 热点 churn (每 {CHURN_EVERY:,} 请求换一批热点, 模拟新内容爆火/旧热点过气)")
+    tr2 = gen_trace(churn_every=CHURN_EVERY)
+    cap = max(1, int(N_KEYS * CACHE_RATIO))
     print(f"  {'策略':<8}{'稳态流量':>12}{'churn流量':>12}{'掉幅':>10}")
     res = {}
     for cls in (LRU, LFU):

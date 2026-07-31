@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# 站点导出的离线快照(几百 KB, 每次导出都会变, 不入库)
+site/dist/

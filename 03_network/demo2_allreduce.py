@@ -10,15 +10,26 @@ demo2: AllReduce 通信模型 —— "千卡规模后通信效率变低"具体�
 
 用经典的 alpha-beta 模型(T = 轮数 x 延迟 + 传输量 / 带宽)算清楚三种算法的代价.
 """
+import os
+import sys
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_float, banner  # noqa: E402
 
 np.seterr(all="ignore")
 
 # ---------------------------------------------------------------- 硬件参数
+NVLINK_GBPS = env_float("NVLINK_GBPS", 450.0, "机内 NVLink 单向带宽(GB/s)")
+IB_GBPS = env_float("IB_GBPS", 25.0, "机间 InfiniBand 单向带宽(GB/s)")
+IB_LAT_US = env_float("IB_LAT_US", 2.5, "机间单跳延迟(us)")
+D_GB = env_float("D_GB", 1.0, "梯度数据量(GB)")
+GPUS_PER_NODE = env_int("GPUS_PER_NODE", 8, "每机卡数(分层 AllReduce 的组大小)")
+
 LINKS = {
     #  名称           单向带宽GB/s   单跳延迟us
-    "NVLink (机内)":      (450.0,      1.0),
-    "InfiniBand (机间)":   (25.0,      2.5),
+    "NVLink (机内)":      (NVLINK_GBPS,   1.0),
+    "InfiniBand (机间)":   (IB_GBPS,  IB_LAT_US),
     "RoCE 以太网":         (12.5,      5.0),
 }
 
@@ -78,14 +89,15 @@ ALGOS = [("Naive(中心汇聚)", naive_allreduce),
 
 
 def main():
+    banner(86)
     print("=" * 86)
     print("AllReduce 通信模型:  T = 通信轮数 x 单跳延迟  +  传输字节 / 带宽")
     print("=" * 86)
 
     # ---------------------------------------------------------- 1. 规模扩展
     bw, lat = LINKS["InfiniBand (机间)"]
-    D = 1e9  # 1GB 梯度, 相当于 250M 参数的 fp32 梯度
-    print(f"\n[1] 固定数据量 {D/1e9:.0f}GB (约 250M 参数的 fp32 梯度), "
+    D = D_GB * 1e9  # 默认 1GB 梯度, 相当于 250M 参数的 fp32 梯度
+    print(f"\n[1] 固定数据量 {D/1e9:g}GB (fp32 下约 {D/4e6:.0f}M 参数的梯度), "
           f"链路 = InfiniBand {bw:.0f}GB/s / {lat:.1f}us")
     print(f"\n  {'卡数':>7}" + "".join(f"{n:>16}" for n, _ in ALGOS)
           + f"{'Ring带宽占比':>14}")
@@ -156,10 +168,11 @@ def main():
 
     # ---------------------------------------------------------- 4. 分层
     print("\n" + "-" * 86)
-    print("[4] 分层 AllReduce 的收益 (1024 卡 = 128 机 x 8 卡)")
     nvb, nvl = LINKS["NVLink (机内)"]
     ibb, ibl = LINKS["InfiniBand (机间)"]
-    G, M = 8, 128        # 每机 8 卡, 共 128 机
+    G = max(2, GPUS_PER_NODE)      # 每机卡数
+    M = max(2, 1024 // G)          # 机数, 总卡数保持 ~1024
+    print(f"[4] 分层 AllReduce 的收益 ({G*M} 卡 = {M} 机 x {G} 卡)")
 
     def reduce_scatter(n, bytes_, bw, lat):
         """(n-1) 步, 每步传 bytes_/n; 结束后每卡持有 1/n 的规约结果."""
@@ -174,7 +187,7 @@ def main():
     t_ag = reduce_scatter(G, D, nvb, nvl)          # 机内 all-gather(对称, 同代价)
     hier = t_rs + t_inter + t_ag
 
-    print(f"\n  扁平 Ring (1024 卡全走 IB)        : {flat*1e3:>8.2f} ms")
+    print(f"\n  扁平 Ring ({G*M} 卡全走 IB)        : {flat*1e3:>8.2f} ms")
     print(f"  分层 AllReduce                    : {hier*1e3:>8.2f} ms  "
           f"({flat/hier:.2f}x 加速)")
     print(f"    ├─ 机内 reduce-scatter (NVLink) : {t_rs*1e3:>8.2f} ms")

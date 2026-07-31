@@ -10,14 +10,23 @@ demo3: DCAI (Data-Centric AI) —— 数据事故如何静悄悄地打掉线上 
 核心演示: 模型代码一行没改, 只是上游特征生产出了问题, 线上 AUC 就会掉.
          PSI 这类分布漂移指标能在 AUC 掉之前(或同时)把事故定位到具体特征.
 """
+import os
+import sys
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.params import env_int, env_float, banner  # noqa: E402
 
 # numpy 2.0 + Apple Accelerate 的已知问题: matmul 会误报 divide-by-zero/overflow 标志位,
 # 即使输入输出全部有限. 与本 demo 的数值无关, 直接屏蔽.
 np.seterr(all="ignore")
 
 rng = np.random.default_rng(42)
-N_TRAIN, N_SERVE, N_FEAT = 60_000, 30_000, 12
+N_TRAIN = env_int("N_TRAIN", 60_000, "训练样本数")
+N_SERVE = env_int("N_SERVE", 30_000, "线上样本数")
+N_FEAT = env_int("N_FEAT", 12, "特征维数")
+SKEW_RATIO = env_float("SKEW_RATIO", 0.30, "事故3: 多大比例的流量取到脏值")
+PSI_BINS = env_int("PSI_BINS", 10, "PSI 分桶数")
 
 
 # ---------------------------------------------------------------- 数据与模型
@@ -60,7 +69,7 @@ def auc(y, s):
 
 
 # ---------------------------------------------------------------- 数据质量指标
-def psi(expect, actual, bins=10):
+def psi(expect, actual, bins=None):
     """Population Stability Index —— 工业界最常用的分布漂移指标.
 
         PSI = Σ (实际占比 - 期望占比) * ln(实际占比 / 期望占比)
@@ -69,6 +78,7 @@ def psi(expect, actual, bins=10):
     分桶边界取自训练期(期望)分布的分位数 —— 这点很关键: 边界必须冻结,
     否则漂移会被自适应的分桶悄悄吸收掉, 指标永远看起来正常.
     """
+    bins = PSI_BINS if bins is None else bins
     edges = np.quantile(expect, np.linspace(0, 1, bins + 1))
     edges[0], edges[-1] = -np.inf, np.inf
     e = np.histogram(expect, edges)[0] / len(expect)
@@ -108,9 +118,9 @@ def incident_skew(X):
     这是推荐系统里最阴险的一类事故: 只影响一部分流量, 平均值看起来几乎没变.
     """
     Xb = X.copy()
-    idx = rng.random(len(Xb)) < 0.3          # 30% 的流量命中旧版本
+    idx = rng.random(len(Xb)) < SKEW_RATIO    # 部分流量命中旧版本
     Xb[idx, 2] = rng.normal(0, 1, idx.sum())  # 被替换成与 label 无关的随机值
-    return Xb, "离在线不一致: feat_2 有 30% 流量取到脏值"
+    return Xb, f"离在线不一致: feat_2 有 {SKEW_RATIO:.0%} 流量取到脏值"
 
 
 def incident_stale(X):
@@ -119,6 +129,7 @@ def incident_stale(X):
 
 
 def main():
+    banner(80)
     print("=" * 80)
     print("DCAI 演示: 模型代码完全不变, 只让上游数据出问题, 看 AUC 和 PSI 各自的反应")
     print("=" * 80)
@@ -154,7 +165,7 @@ def main():
 
     Xbad, _ = incident_skew(Xse)
     j = 2
-    print(f"\n  事故3 (离在线不一致, 30% 流量的 feat_{j} 被换成脏值):")
+    print(f"\n  事故3 (离在线不一致, {SKEW_RATIO:.0%} 流量的 feat_{j} 被换成脏值):")
     print(f"    训练期均值 {Xtr[:, j].mean():+.4f} / 线上均值 {Xbad[:, j].mean():+.4f}")
     print(f"    训练期方差 {Xtr[:, j].var():.4f} / 线上方差 {Xbad[:, j].var():.4f}")
     print(f"    PSI = {psi(Xtr[:, j], Xbad[:, j]):.3f}  (判定: 正常)")
