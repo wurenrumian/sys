@@ -130,27 +130,28 @@ function renderNav() {
 
 /* ------------------------------------------------------------------ 总览图 */
 function overviewDiagram() {
+  // 颜色一律走 CSS 变量, 这样浅色/深色主题下都清楚
   var seg = [
-    ['磁盘 / 对象存储', '#8b95a6'],
-    ['CPU 内存 (ETL)', '#6aa9ff'],
-    ['GPU 显存', '#7ee0b8'],
-    ['算子执行', '#ffcc66'],
-    ['跨卡同步', '#ff9d7b']
+    ['磁盘 / 对象存储', 'var(--c1)'],
+    ['CPU 内存 (ETL)', 'var(--c2)'],
+    ['GPU 显存', 'var(--c3)'],
+    ['算子执行', 'var(--c4)'],
+    ['跨卡同步', 'var(--c5)']
   ];
   var w = 152, gap = 22, y = 34, h = 46;
   var boxes = seg.map(function (s, i) {
     var x = i * (w + gap);
     return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="7" ' +
-      'fill="#161a21" stroke="' + s[1] + '"/>' +
+      'fill="var(--bg2)" stroke="' + s[1] + '"/>' +
       '<text x="' + (x + w / 2) + '" y="' + (y + 28) + '" text-anchor="middle" ' +
-      'fill="#d8dee9" font-size="13">' + s[0] + '</text>' +
+      'fill="var(--fg)" font-size="13">' + s[0] + '</text>' +
       (i < seg.length - 1 ? '<path d="M' + (x + w + 3) + ' ' + (y + h / 2) + ' h ' + (gap - 8) +
-        '" stroke="#8b95a6" stroke-width="1.5" marker-end="url(#ar)"/>' : '');
+        '" stroke="var(--fg-dim)" stroke-width="1.5" marker-end="url(#ar)"/>' : '');
   }).join('');
   var spans = [
-    [0, 2, '01 存储：读得动、存得起', '#6aa9ff'],
-    [2, 4, '02 编译：算得快', '#7ee0b8'],
-    [3, 5, '03 网络：对得齐', '#ff9d7b']
+    [0, 2, '01 存储：读得动、存得起', 'var(--c2)'],
+    [2, 4, '02 编译：算得快', 'var(--c3)'],
+    [3, 5, '03 网络：对得齐', 'var(--c5)']
   ];
   var bars = spans.map(function (s, k) {
     var x0 = s[0] * (w + gap), x1 = s[1] * (w + gap) - gap;
@@ -161,8 +162,8 @@ function overviewDiagram() {
   }).join('');
   return '<div class="diagram"><svg viewBox="0 0 ' + (5 * (w + gap)) + ' 190" width="100%" height="190">' +
     '<defs><marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">' +
-    '<path d="M0,0 L7,3.5 L0,7 z" fill="#8b95a6"/></marker></defs>' +
-    '<text x="0" y="16" fill="#8b95a6" font-size="12">一次训练 step 的数据流向 —— 三个方向是这条线上的三段</text>' +
+    '<path d="M0,0 L7,3.5 L0,7 z" fill="var(--fg-dim)"/></marker></defs>' +
+    '<text x="0" y="16" fill="var(--fg-dim)" font-size="12">一次训练 step 的数据流向 —— 三个方向是这条线上的三段</text>' +
     boxes + bars + '</svg></div>';
 }
 
