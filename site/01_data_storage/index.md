@@ -32,7 +32,7 @@ label: {是否点击, 是否完播, 是否点赞, 是否下单}              # �
 ## 二、demo1：行存 vs 列存 —— "读不动"的解法
 
 ```bash
-python3 demo1_row_vs_col.py
+python3 01_data_storage/demo1_row_vs_col.py
 ```
 
 **要点**
@@ -53,7 +53,7 @@ demo 会打印：全字段扫描 vs 投影扫描的字节量/耗时，以及行�
 ## 三、demo2：多级存储与缓存 —— "存不起"的解法
 
 ```bash
-python3 demo2_cache_tier.py
+python3 01_data_storage/demo2_cache_tier.py
 ```
 
 **要点**
@@ -80,7 +80,7 @@ python3 demo2_cache_tier.py
 ## 四、demo3：DCAI —— 数据质量比模型更值钱
 
 ```bash
-python3 demo3_data_quality.py
+python3 01_data_storage/demo3_data_quality.py
 ```
 
 **要点**

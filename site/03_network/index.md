@@ -28,7 +28,7 @@ demo1 会把这条曲线直接跑出来。
 ## 二、demo1：两类流量的冲突与调度策略
 
 ```bash
-python3 demo1_traffic_conflict.py
+python3 03_network/demo1_traffic_conflict.py
 ```
 
 对比四种调度方式，在"RPC 小包 + 训练大流"混跑下的表现：
@@ -53,7 +53,7 @@ python3 demo1_traffic_conflict.py
 ## 三、demo2：AllReduce 通信量 —— 为什么拓扑算法这么重要
 
 ```bash
-python3 demo2_allreduce.py
+python3 03_network/demo2_allreduce.py
 ```
 
 **要点**
@@ -77,7 +77,7 @@ python3 demo2_allreduce.py
 ## 四、demo3：拥塞控制 —— 为什么一个算法服务不了两类流量
 
 ```bash
-python3 demo3_congestion.py
+python3 03_network/demo3_congestion.py
 ```
 
 **要点**

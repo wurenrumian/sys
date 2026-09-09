@@ -1,0 +1,9 @@
+{
+  "name": "ai-infra-systems",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix site run dev",
+    "build": "npm --prefix site run build",
+    "preview": "npm --prefix site run preview"
+  }
+}

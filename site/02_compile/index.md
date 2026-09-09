@@ -27,7 +27,7 @@
 ## 二、demo1：Python 解释器开销到底有多大
 
 ```bash
-python3 demo1_python_overhead.py
+python3 02_compile/demo1_python_overhead.py
 ```
 
 测同一个推荐场景的特征交叉计算，五种写法逐级递进：纯 Python 循环 → 列表推导 →
@@ -46,7 +46,7 @@ numpy 向量化 → 消除临时数组 → torch（可选）。会打印每一�
 ## 三、demo2：算子融合 —— 向量化之后的下一道墙
 
 ```bash
-python3 demo2_operator_fusion.py
+python3 02_compile/demo2_operator_fusion.py
 ```
 
 **要点**
@@ -64,7 +64,7 @@ python3 demo2_operator_fusion.py
 ## 四、demo3：显存碎片 —— 为什么显存"够"却 OOM
 
 ```bash
-python3 demo3_gpu_mem_frag.py
+python3 02_compile/demo3_gpu_mem_frag.py
 ```
 
 **要点**
@@ -83,7 +83,7 @@ python3 demo3_gpu_mem_frag.py
 ## 五、demo4：动态批处理 —— 吞吐与 P99 的取舍
 
 ```bash
-python3 demo4_dynamic_batch.py
+python3 02_compile/demo4_dynamic_batch.py
 ```
 
 **要点**
