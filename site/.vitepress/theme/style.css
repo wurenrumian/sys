@@ -1,0 +1,269 @@
+/*
+ * 交互式 demo 让正文比默认 688px 宽不少，这里放宽一点，
+ * 长段落仍然保持可读宽度。
+ */
+:root {
+  --vp-layout-max-width: 1680px;
+  --sim-blue: #3b82f6;
+  --sim-amber: #f59e0b;
+  --sim-red: #ef4444;
+  --sim-green: #10b981;
+  --sim-violet: #8b5cf6;
+  --sim-cyan: #06b6d4;
+}
+
+.VPDoc .container {
+  max-width: 1040px !important;
+}
+
+/* 代码块里的命令行不要被交互组件抢了视觉重心 */
+.vp-doc .language-bash code {
+  font-size: 12.5px;
+}
+
+/* =========================================================================
+ * 交互式 demo 的通用外壳（全局，供各 *Demo.vue 复用）
+ * ========================================================================= */
+.simcard {
+  margin: 20px 0;
+  padding: 18px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+}
+.simcard__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.simcard__eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vp-c-brand-1);
+  font-weight: 700;
+}
+.simcard__title {
+  margin: 4px 0 0;
+  font-size: 17px;
+  line-height: 1.5;
+}
+.simcard__badge {
+  flex: none;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--sim-green);
+  background: color-mix(in srgb, var(--sim-green) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sim-green) 35%, transparent);
+}
+.simcard__badge.is-busy {
+  color: var(--sim-amber);
+  background: color-mix(in srgb, var(--sim-amber) 14%, transparent);
+  border-color: color-mix(in srgb, var(--sim-amber) 35%, transparent);
+}
+.simcard__controls {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  background: var(--vp-c-bg);
+}
+.simcard__field > label {
+  display: block;
+  font-size: 12.5px;
+  color: var(--vp-c-text-2);
+  margin-bottom: 6px;
+}
+.simcard__field > label b {
+  color: var(--vp-c-text-1);
+}
+.simcard__hint {
+  color: var(--vp-c-text-3);
+  font-size: 11.5px;
+}
+.simcard__row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.simcard__seg {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.simcard__seg button,
+.simcard__btn {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.simcard__seg button:hover,
+.simcard__btn:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-text-1);
+}
+.simcard__seg button.is-on {
+  background: var(--vp-c-brand-1);
+  border-color: var(--vp-c-brand-1);
+  color: #fff;
+}
+.simcard__seg--sm button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.simcard__controls input[type='range'] {
+  width: 100%;
+  accent-color: var(--vp-c-brand-1);
+  cursor: pointer;
+}
+.simcard__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+.simcard__metric {
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg);
+}
+.simcard__metric span {
+  display: block;
+  font-size: 11px;
+  color: var(--vp-c-text-3);
+}
+.simcard__metric b {
+  font-size: 15.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.simcard__metric.is-hot {
+  border-color: color-mix(in srgb, var(--sim-red) 45%, transparent);
+}
+.simcard__metric.is-hot b {
+  color: var(--sim-red);
+}
+.simcard__block {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--vp-c-divider);
+}
+.simcard__block h4 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.simcard__sub {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--vp-c-text-3);
+}
+.simcard__read {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--vp-c-text-2);
+  margin: 14px 0 0;
+}
+.simcard__read b {
+  color: var(--vp-c-text-1);
+}
+.simcard__foot {
+  margin: 16px 0 0;
+  font-size: 11.5px;
+  color: var(--vp-c-text-3);
+}
+.simcard__legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--vp-c-text-2);
+}
+.simcard__legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 14px;
+}
+.simcard__sw {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  display: inline-block;
+  flex: none;
+}
+.simcard__tablewrap {
+  overflow-x: auto;
+}
+.simcard__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.simcard__table th,
+.simcard__table td {
+  padding: 7px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--vp-c-divider);
+  white-space: nowrap;
+}
+.simcard__table th:first-child,
+.simcard__table td:first-child {
+  text-align: left;
+}
+.simcard__table th {
+  font-weight: 600;
+  color: var(--vp-c-text-3);
+  font-size: 12px;
+}
+.simcard__table tbody tr {
+  transition: background 0.12s;
+}
+.simcard__table tbody tr.is-clickable {
+  cursor: pointer;
+}
+.simcard__table tbody tr.is-clickable:hover {
+  background: var(--vp-c-bg-soft);
+}
+.simcard__table tbody tr.is-active {
+  background: color-mix(in srgb, var(--vp-c-brand-1) 12%, transparent);
+}
+.simcard__table td.is-hot {
+  color: var(--sim-red);
+}
+.simcard__table td.is-name {
+  font-weight: 600;
+}
+.simcard__chart {
+  position: relative;
+  width: 100%;
+}
+.simcard__chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* 终端 / 代码回放 */
+.simterm {
+  margin: 18px 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--vp-code-block-bg, #1e1e20);
+}

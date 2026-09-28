@@ -48,6 +48,21 @@ python3 01_data_storage/demo1_row_vs_col.py
 
 demo 会打印：全字段扫描 vs 投影扫描的字节量/耗时，以及行存/列存分别的压缩比。
 
+### 亲手算一遍（浏览器内实时分析）
+
+拖一下投影字段数，看行存的字节量为什么纹丝不动、列存怎么线性下降；
+压缩比用的是脚本在本机 zlib-6 的实测值。
+
+<RowVsColDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="01_data_storage_demo1_row_vs_col"
+  label="01 / demo1 · row_vs_col 真实输出"
+  command="python3 01_data_storage/demo1_row_vs_col.py"
+/>
+
 ---
 
 ## 三、demo2：多级存储与缓存 —— "存不起"的解法
@@ -74,6 +89,21 @@ python3 01_data_storage/demo2_cache_tier.py
 - demo 里对比 LRU / LFU / 无缓存，并算出**有效平均延迟**。你会看到 LFU 在 Zipf 分布下
   明显赢 LRU（因为热点稳定），但在有"流量突变"时 LRU 反而更稳 —— 对应表格里
   TikTok 那条 "分布式特征索引缓存（Embedding Cache），减少 RDMA 远程访问次数"。
+
+### 亲手跑一遍（浏览器内实时模拟）
+
+调 Zipf α 看长尾有多偏，拖缓存容量看命中率曲线，切 LRU/LFU、开不开热点 churn，
+再拖穿透率看「提命中率 vs 让某层更快」哪个更值。全部实时重算。
+
+<CacheTierDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="01_data_storage_demo2_cache_tier"
+  label="01 / demo2 · cache_tier 真实输出"
+  command="python3 01_data_storage/demo2_cache_tier.py"
+/>
 
 ---
 
@@ -105,6 +135,21 @@ python3 01_data_storage/demo3_data_quality.py
   **关联**，不是它的直方图。而这恰恰是推荐系统最高频的一类事故。
   所以工业上必须分层组合：统计类（空值率）抓任务挂掉、分布类（PSI/KS）抓口径变更、
   一致性对拍抓训推不一致、特征-label 关联漂移抓语义错位、影子流量 AUC 兜底。
+
+### 亲手跑一遍（浏览器内实时模拟）
+
+对照表里五种情形，看 AUC 实际掉了多少、PSI 又是怎么报的。重点看最后两行：
+AUC 掉了 2 个点以上，PSI 却判「正常」——下面的两张图就是这条盲区。
+
+<DataQualityDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="01_data_storage_demo3_data_quality"
+  label="01 / demo3 · data_quality 真实输出"
+  command="python3 01_data_storage/demo3_data_quality.py"
+/>
 
 ---
 

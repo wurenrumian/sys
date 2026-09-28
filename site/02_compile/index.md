@@ -41,6 +41,21 @@ numpy 向量化 → 消除临时数组 → torch（可选）。会打印每一�
   编译方向要做的事，是让你**不用手写向量化**也能得到这个效果。
 - 你会看到向量化之后瓶颈从"解释器"变成了"内存带宽" —— 这就引出了 demo2。
 
+### 亲手算一遍（浏览器内实时分析）
+
+下面把「解释开销 → 内存带宽」这个瓶颈转移做成了可调的分析器：拖 N，看每种写法的成本、
+以及带宽下限什么时候接管。每元素纳秒数和带宽都取自左侧脚本在本机的真实输出。
+
+<PythonOverheadDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="02_compile_demo1_python_overhead"
+  label="02 / demo1 · python_overhead 真实输出"
+  command="python3 02_compile/demo1_python_overhead.py"
+/>
+
 ---
 
 ## 三、demo2：算子融合 —— 向量化之后的下一道墙
@@ -58,6 +73,21 @@ python3 02_compile/demo2_operator_fusion.py
   让你看到"这段代码是 memory-bound 还是 compute-bound" —— 这是所有编译优化的第一个判断。
 - 这正是 TVM/XLA/`torch.compile` 的核心价值，也是表格里"融合传统编译器（LLVM/GCC）
   与深度学习编译器（TVM）优势"这句话的落点。
+
+### 亲手算一遍（浏览器内实时分析）
+
+拖一下 N，看三种实现的访存量差多少；再看本机实测的规模扩展曲线与块大小扫描——
+后者恰好展示了「块要小到进 cache」和「块要大到摊薄解释器开销」这两个要求如何直接冲突。
+
+<OperatorFusionDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="02_compile_demo2_operator_fusion"
+  label="02 / demo2 · operator_fusion 真实输出"
+  command="python3 02_compile/demo2_operator_fusion.py"
+/>
 
 ---
 
@@ -78,6 +108,22 @@ python3 02_compile/demo3_gpu_mem_frag.py
   （代价是引入少量内部碎片和一层间接寻址）—— 这就是 vLLM 的 PagedAttention
   为什么是范式级改进，以及为什么推荐场景更需要它。
 
+### 亲手拉一遍（浏览器内实时模拟）
+
+把水位拉到 80%、90%，看连续分配器怎么因为**外部碎片** OOM；再换 Buddy、换页大小，
+看碎片如何从「不可控的外部碎片」变成「可用一个旋钮调节的内部碎片」。
+下方的显存地址空间图里，灰色空洞就是那些「还在、但用不上」的显存。
+
+<GpuMemFragDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="02_compile_demo3_gpu_mem_frag"
+  label="02 / demo3 · gpu_mem_frag 真实输出"
+  command="python3 02_compile/demo3_gpu_mem_frag.py"
+/>
+
 ---
 
 ## 五、demo4：动态批处理 —— 吞吐与 P99 的取舍
@@ -95,6 +141,21 @@ python3 02_compile/demo4_dynamic_batch.py
 - demo 用排队模型模拟三种策略：**固定批 / 固定超时 / 自适应（按队列积压动态调整）**，
   在正弦波动 + 突发尖峰的流量下，对比吞吐、P50、P99、P999 和 GPU 利用率。
 - 你会看到自适应策略在**两端都不吃亏**，这就是那条课题的价值所在。
+
+### 亲手拉一遍（浏览器内实时模拟）
+
+先选「固定批 bs=256」，看低谷期那根巨大的延迟尖峰（系统最闲、用户等最久）；再切「自适应」，
+看它如何在低谷期几乎不等、高峰期自动放大批量。拖动 QPS 看流量变化对 P999 的影响。
+
+<DynamicBatchDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="02_compile_demo4_dynamic_batch"
+  label="02 / demo4 · dynamic_batch 真实输出"
+  command="python3 02_compile/demo4_dynamic_batch.py"
+/>
 
 ---
 

@@ -48,6 +48,27 @@ python3 03_network/demo1_traffic_conflict.py
   从 320µs 降到了几微秒，给高优先级流量创造了插队点。
 - demo 会打印 RPC 的 P50/P99/P999 和训练流的吞吐，让你看到这个取舍的具体数字。
 
+### 亲手跑一遍（浏览器内实时模拟）
+
+下面不是截图，也不是录屏——它是把上面那个脚本的仿真模型（store-and-forward、包不可抢占）
+原样移植到浏览器里实时计算的。**调调度策略、要不要分片、集合通信是周期性还是突发、利用率拉多高，
+指标立刻变**。建议按这个顺序玩：
+
+1. 先保持 `FIFO 单队列` + `周期性`，看动画里那个蓝色大包如何把 RPC（橙色）堵在队列里；
+2. 切到 `优先级(RPC优先)`，观察 P999 几乎**不动**——因为包一旦开始发送就不可抢占；
+3. 切到 `优先级+分片4KB`，看着不可抢占的时间窗口和大包一起被切碎，P999 直接掉两个数量级；
+4. 把「集合通信到达」切到 `突发（弹性混部）`，再拉高利用率——这才是 SLA 真正的杀手。
+
+<TrafficConflictDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="03_network_demo1_traffic_conflict"
+  label="03 / demo1 · traffic_conflict 真实输出"
+  command="python3 03_network/demo1_traffic_conflict.py"
+/>
+
 ---
 
 ## 三、demo2：AllReduce 通信量 —— 为什么拓扑算法这么重要
@@ -72,6 +93,18 @@ python3 03_network/demo2_allreduce.py
 - demo 会在 8/64/512/1024 卡、不同数据量下算出各算法的耗时，并标出交叉点。
   你会清楚看到"千卡规模下通信效率变低"具体是怎么发生的。
 
+### 亲手算一遍（浏览器内实时模型）
+
+<AllReduceDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="03_network_demo2_allreduce"
+  label="03 / demo2 · allreduce 真实输出"
+  command="python3 03_network/demo2_allreduce.py"
+/>
+
 ---
 
 ## 四、demo3：拥塞控制 —— 为什么一个算法服务不了两类流量
@@ -91,6 +124,18 @@ python3 03_network/demo3_congestion.py
   - **BBR 式（带宽时延积驱动）**：主动探测瓶颈带宽和最小 RTT，把在途数据量控制在 BDP 附近。
 - demo 打印每种算法的：链路利用率、平均队列深度、P99 排队延迟、公平性。
   你会看到**队列深度和尾延迟几乎是一回事**，而"高利用率 + 低队列"是所有拥塞控制的圣杯。
+
+### 亲手跑一遍（浏览器内实时模拟）
+
+<CongestionDemo />
+
+### 脚本的真实输出（在本机实跑后回放）
+
+<RealOutput
+  slug="03_network_demo3_congestion"
+  label="03 / demo3 · congestion 真实输出"
+  command="python3 03_network/demo3_congestion.py"
+/>
 
 ---
 
